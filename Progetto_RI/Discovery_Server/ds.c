@@ -21,8 +21,8 @@ struct peer_elem{
     struct peer_elem* next;
     struct peer_elem* prev;
 };
-struct peer_elem* peer_list_head;
-struct peer_elem* peer_list_tail;
+struct peer_elem* peers_list;
+struct peer_elem* peers_list_tail;
 
 /*
 Descrittore di un peer
@@ -68,8 +68,8 @@ void print_all_peers(){
 ### GLOBALS INIT E FREE ################################################
 */
 void globals_init(){
-    peer_list_head = NULL;
-    peer_list_tail = NULL;
+    peers_list = NULL;
+    peers_list_tail = NULL;
     peers_number = 0;
     table_size = DEFAULT_TABLE_SIZE;
     peers_table = malloc(sizeof(struct peer_des)*table_size);
@@ -89,12 +89,12 @@ void free_peers_table(){
 
 void free_peers_list(){
     struct peer_elem* aux;
-    while(peer_list_head!=NULL){
-        aux = peer_list_head;
-        peer_list_head = peer_list_head->next;
+    while(peers_list!=NULL){
+        aux = peers_list;
+        peers_list = peers_list->next;
         free(aux);
     }
-    peer_list_tail = NULL;
+    peers_list_tail = NULL;
 }
 
 
@@ -112,6 +112,7 @@ Elementi della struct peer_des
     struct sockaddr_in addr;
     int port;
     int neighbours_number; //Numero dei vicini
+    int  neighbours_vector_size;
     int* neighbours_vector; //Array dinamico degli id dei vicini
 */
 
@@ -139,7 +140,7 @@ int peers_table_add_peer(struct sockaddr_in addr, int port){
     }
     /*
 Se siamo giunti fino a qui vuol dire che l'array è pieno
-Raddoppiamo la sua grandezza moltiplicando per due table_size
+Raddoppiamo la sua grandezza moltiplicando per due table_size e usando realloc
     */
    table_size = table_size*2;
    realloc(peers_table,sizeof(struct peer_des)*table_size);
@@ -201,6 +202,114 @@ void peers_table_remove_neighbour(int id, int neighbour_id){
             pd->neighbours_number--;
             return;
         }
+    }
+}
+
+// Controlla se il peer id ha come vicino neighbour_id
+int peers_table_has_neighbour(int id, int neighbour_id){
+    struct peer_des *pd;
+    if(id>=table_size) return -1;
+    pd = &peers_table[id];
+    if(pd->port == -1) return -1;
+    for(int i = 0 ; i<pd->neighbours_vector_size;i++){
+        if(pd->neighbours_vector[i] == neighbour_id){
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+### GESTIONE peers_list ##############################################
+*/
+
+/*
+Inserimento in una lista ordinata usando due puntatori
+*/
+void peers_list_add(struct peer_elem* new_peer){
+    struct peer_elem *peer, *prev_peer;
+    peer = peers_list;
+    prev_peer = NULL;
+    while(peer != NULL && peer->port <= new_peer->port){
+        prev_peer = peer;
+        peer = peer->next;
+    }
+    new_peer->next = peer;
+    if(prev_peer == NULL){//new_peer è il primo peer inserito
+        peers_list = new_peer;
+        peers_list_tail = new_peer;
+    }else{
+        prev_peer->next = new_peer;
+        new_peer->prev = prev_peer;
+        peers_table_add_neighbour(prev_peer->id,new_peer->id);
+        peers_table_add_neighbour(new_peer->id,prev_peer->id);
+        if(peer!=NULL){//Se new_peer non è la coda
+            peer->prev = new_peer;
+            peers_table_add_neighbour(peer->id,new_peer->id);
+            peers_table_add_neighbour(new_peer->id,peer->id);
+        }else{//Altrimenti aggiorno il puntatore alla coda
+            peers_list_tail = new_peer;
+        }
+    }
+    
+}
+
+void peer_list_remove(int id){
+    struct peer_elem *peer, *prev_peer;
+    peer = peers_list;
+    prev_peer = NULL;
+    while(peer != NULL && peer->id != id){
+        prev_peer = peer;
+        peer = peer->next;
+    }
+    if(prev_peer!=NULL){
+        prev_peer->next = peer->next;
+    }else{
+        peers_list = peer->next;
+    }
+    if(peer->next!=NULL){
+        peer->next->prev = prev_peer;
+    }else{
+        peers_list_tail = prev_peer;
+    }
+    if(prev_peer!=NULL && peer->next!=NULL){
+// Aggiorno la lista dei vicini
+    peers_table_add_neighbour(prev_peer->id,peer->next->id);
+    peers_table_add_neighbour(peer->next->id,prev_peer->id);
+    }
+}
+
+void fix_head_isolation(){
+    if(peers_list == NULL) return;
+    struct peer_elem *peer = peers_list->next;
+    int id = peers_list->id;
+    struct peer_des *pd = get_peer_des(id);
+    //Se possiede la quantità minima di vicini salto il controllo
+    if(pd->neighbours_number>=MIN_NEIGHBOUR_NUMBER)return;
+    while(peer!=NULL){
+        if(!peers_table_has_neighbour(id,peer->id)){
+            peers_table_add_neighbour(id,peer->id);
+            peers_table_add_neighbour(peer->id,id);
+            if(pd->neighbours_number>=MIN_NEIGHBOUR_NUMBER) return;
+        }
+        peer = peer->next;
+    }
+}
+
+void fix_tail_isolation(){
+    if(peers_list_tail == NULL) return;
+    struct peer_elem *peer = peers_list_tail->prev;
+    int id = peers_list->id;
+    struct peer_des *pd = get_peer_des(id);
+    //Se possiede la quantità minima di vicini salto il controllo
+    if(pd->neighbours_number>=MIN_NEIGHBOUR_NUMBER)return;
+    while(peer!=NULL){
+        if(!peers_table_has_neighbour(id,peer->id)){
+            peers_table_add_neighbour(id,peer->id);
+            peers_table_add_neighbour(peer->id,id);
+            if(pd->neighbours_number>=MIN_NEIGHBOUR_NUMBER) return;
+        }
+        peer = peer->prev;
     }
 }
 
@@ -268,7 +377,7 @@ int main(int argc, char* argv[]){
 
                 }
             }
-        }\
+        }
         
     }
 
