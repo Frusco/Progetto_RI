@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <unistd.h>
 #include <pthread.h>
 //#define MIN_NEIGHBOUR_NUMBER 2
 //#define DEFAULT_TABLE_SIZE 2
@@ -38,9 +39,9 @@ Descrittore di un peer
 struct peer_des{
     struct in_addr addr;
     int port;
-    int neighbours_number; //Numero dei vicini
-    int  neighbours_vector_size;
-    int* neighbours_vector; //Array dinamico degli id dei vicini
+    int neighbors_number; //Numero dei vicini
+    int  neighbors_vector_size;
+    int* neighbors_vector; //Array dinamico degli id dei vicini
 };
 int peers_number; //Il numero dei peer attualmente nelle rete
 int peers_table_size; //La grandezza della peers_table
@@ -59,10 +60,10 @@ struct peer_des* get_peer_des(int id){
 void peers_table_print_peer(int id){
     struct peer_des* p = get_peer_des(id);
     if(p){
-        printf("\nID: %d\naddr: %u\nport: %d\nneighbours_number: %d\nneighbours_list: ",id,p->addr.s_addr,p->port,p->neighbours_number);
-        for(int i = 0 ; i<p->neighbours_vector_size;i++){
-            if(p->neighbours_vector[i]==-1)continue;
-            printf("%d ",p->neighbours_vector[i]);
+        printf("\nID: %d\naddr: %u\nport: %d\nneighbors_number: %d\nneighbors_list: ",id,p->addr.s_addr,p->port,p->neighbors_number);
+        for(int i = 0 ; i<p->neighbors_vector_size;i++){
+            if(p->neighbors_vector[i]==-1)continue;
+            printf("%d ",p->neighbors_vector[i]);
         }
         printf("\n");
     }
@@ -72,10 +73,10 @@ void peers_table_print_peer_neighbor(int id){
     pthread_mutex_lock(&table_mutex);
     struct peer_des* p = get_peer_des(id);
     if(p){
-        printf("\nID: %d\nneighbours_number: %d\nneighbours_list: ",id,p->addr.s_addr,p->port,p->neighbours_number);
-        for(int i = 0 ; i<p->neighbours_vector_size;i++){
-            if(p->neighbours_vector[i]==-1)continue;
-            printf("%d ",p->neighbours_vector[i]);
+        printf("ID: %d\nneighbors_number: %d\nneighbors_list: ",id,p->neighbors_number);
+        for(int i = 0 ; i<p->neighbors_vector_size;i++){
+            if(p->neighbors_vector[i]==-1)continue;
+            printf("%d ",p->neighbors_vector[i]);
         }
         printf("\n");
     }
@@ -112,7 +113,7 @@ void globals_init(){
 void free_peers_table(){
     for(int i = 0 ; i<peers_table_size; i++){
         if(peers_table[i].port == -1) continue;
-        free(peers_table[i].neighbours_vector);
+        free(peers_table[i].neighbors_vector);
     }
     free(peers_table);
 }
@@ -141,20 +142,20 @@ void globals_free(){
 Elementi della struct peer_des
     struct sockaddr_in addr;
     int port;
-    int neighbours_number; //Numero dei vicini
-    int  neighbours_vector_size;
-    int* neighbours_vector; //Array dinamico degli id dei vicini
+    int neighbors_number; //Numero dei vicini
+    int  neighbors_vector_size;
+    int* neighbors_vector; //Array dinamico degli id dei vicini
 */
 
 void populate_peers_table_row(int i,struct in_addr addr, int port){
     struct peer_des *pd = &peers_table[i];
     pd->addr = addr;
     pd->port = port;
-    pd->neighbours_number = 0;
-    pd->neighbours_vector_size = DEFAULT_NEIGHBOUR_VECTOR_SIZE;
-    pd->neighbours_vector = malloc(sizeof(int)*pd->neighbours_vector_size);
-    for(int i = 0 ; i< pd->neighbours_vector_size; i++){
-        pd->neighbours_vector[i] = -1;// inizializzo come vuoti
+    pd->neighbors_number = 0;
+    pd->neighbors_vector_size = DEFAULT_NEIGHBOUR_VECTOR_SIZE;
+    pd->neighbors_vector = malloc(sizeof(int)*pd->neighbors_vector_size);
+    for(int i = 0 ; i< pd->neighbors_vector_size; i++){
+        pd->neighbors_vector[i] = -1;// inizializzo come vuoti
     }
     peers_number++;
 }
@@ -201,7 +202,7 @@ void peers_table_remove_peer(int i){
     pd = &peers_table[i];
     if(pd->port == -1)return;
     pd->port = -1;
-    free(pd->neighbours_vector);
+    free(pd->neighbors_vector);
     peers_number--;
 }
 
@@ -211,39 +212,39 @@ Aggiunge un vicino al vettore dinamico dei vicini ( neighbour_vector )
 int peers_table_add_neighbour(int id , int neighbour_id){
     //printf("Sono %d e aggiungo %d alla mia lista\n",id,neighbour_id);
     int i;
-    int backup_neighbours_size;
+    int backup_neighbors_size;
     void* aux;
     struct peer_des *pd;
     if(id>=peers_table_size) return -1;
     pd = &peers_table[id];
     if(pd->port == -1)return -1;
-    for(i = 0 ; i<pd->neighbours_vector_size;i++){
-        if(pd->neighbours_vector[i]==-1){// trovata riga libera
-            pd->neighbours_vector[i] = neighbour_id;
-            pd->neighbours_number++;
+    for(i = 0 ; i<pd->neighbors_vector_size;i++){
+        if(pd->neighbors_vector[i]==-1){// trovata riga libera
+            pd->neighbors_vector[i] = neighbour_id;
+            pd->neighbors_number++;
             return 1;
         }
     }
     /*
 Se siamo giunti fino a qui vuol dire che l'array è pieno
-Raddoppiamo la sua grandezza moltiplicando per due neighbours_vector_size
+Raddoppiamo la sua grandezza moltiplicando per due neighbors_vector_size
     */
-   backup_neighbours_size = pd->neighbours_vector_size;
-   pd->neighbours_vector_size = pd->neighbours_vector_size*2;
-   //printf("Memoria richiesta %ld byte\n",sizeof(int)*pd->neighbours_vector_size);
-   aux = realloc(pd->neighbours_vector,sizeof(int)*pd->neighbours_vector_size);
+   backup_neighbors_size = pd->neighbors_vector_size;
+   pd->neighbors_vector_size = pd->neighbors_vector_size*2;
+   //printf("Memoria richiesta %ld byte\n",sizeof(int)*pd->neighbors_vector_size);
+   aux = realloc(pd->neighbors_vector,sizeof(int)*pd->neighbors_vector_size);
    //printf("AUX %p\n",aux);
    if(aux == NULL){
        perror("Memoria insufficiente");
-       pd->neighbours_vector_size = backup_neighbours_size;
+       pd->neighbors_vector_size = backup_neighbors_size;
        return -1;
    }
-   pd->neighbours_vector = (int*)aux;
-   for(int j = i+1 ; j<pd->neighbours_vector_size;j++){
-       pd->neighbours_vector[j] = -1;
+   pd->neighbors_vector = (int*)aux;
+   for(int j = i+1 ; j<pd->neighbors_vector_size;j++){
+       pd->neighbors_vector[j] = -1;
    }
-   pd->neighbours_vector[i] = neighbour_id;
-   pd->neighbours_number++;
+   pd->neighbors_vector[i] = neighbour_id;
+   pd->neighbors_number++;
    return 1;
 }
 
@@ -252,10 +253,10 @@ void peers_table_remove_neighbour(int id, int neighbour_id){
     if(id>=peers_table_size) return;
     pd = &peers_table[id];
     if(pd->port == -1) return;
-    for(int i = 0 ; i<pd->neighbours_vector_size;i++){
-        if(pd->neighbours_vector[i] == neighbour_id){
-            pd->neighbours_vector[i] = -1;
-            pd->neighbours_number--;
+    for(int i = 0 ; i<pd->neighbors_vector_size;i++){
+        if(pd->neighbors_vector[i] == neighbour_id){
+            pd->neighbors_vector[i] = -1;
+            pd->neighbors_number--;
             return;
         }
     }
@@ -271,12 +272,28 @@ int peers_table_has_neighbour(int id, int neighbour_id){
     if(id>=peers_table_size) return 0;
     pd = &peers_table[id];
     if(pd->port == -1) return 0;
-    for(int i = 0 ; i<pd->neighbours_vector_size;i++){
-        if(pd->neighbours_vector[i] == neighbour_id){
+    for(int i = 0 ; i<pd->neighbors_vector_size;i++){
+        if(pd->neighbors_vector[i] == neighbour_id){
             return 1;
         }
     }
     return 0;
+}
+
+int get_id_by_ip_port(struct in_addr addr,int port){
+    struct peer_des* pd;
+    int ret =-1;
+    pthread_mutex_lock(&table_mutex);
+    for(int i=0 ; i<peers_table_size;i++){
+        pd = &peers_table[i];
+        if(pd->port==-1) continue;
+        if((pd->addr.s_addr == addr.s_addr )&& (pd->port == port)){
+            ret = i;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&table_mutex);
+    return ret;
 }
 
 /*
@@ -367,14 +384,14 @@ void fix_head_isolation(){
     int id = peers_list->id;
     struct peer_des *pd = get_peer_des(id);
     //Se possiede la quantità minima di vicini salto il controllo
-    if(pd->neighbours_number>=MIN_NEIGHBOUR_NUMBER)return;
+    if(pd->neighbors_number>=MIN_NEIGHBOUR_NUMBER)return;
     while(peer!=NULL){
         //printf("Sono %d e forse ho trovato un nuovo amichetto %d\n",id,peer->id);
         if(!peers_table_has_neighbour(id,peer->id)){
             //printf("Sono %d e ho trovato un nuovo amichetto %d\n",id,peer->id);
             peers_table_add_neighbour(id,peer->id);
             peers_table_add_neighbour(peer->id,id);
-            if(pd->neighbours_number>=MIN_NEIGHBOUR_NUMBER) return;
+            if(pd->neighbors_number>=MIN_NEIGHBOUR_NUMBER) return;
         }
         peer = peer->next;
     }
@@ -391,12 +408,12 @@ void fix_tail_isolation(){
     int id = peers_list_tail->id;
     struct peer_des *pd = get_peer_des(id);
     //Se possiede la quantità minima di vicini salto il controllo
-    if(pd->neighbours_number>=MIN_NEIGHBOUR_NUMBER)return;
+    if(pd->neighbors_number>=MIN_NEIGHBOUR_NUMBER)return;
     while(peer!=NULL){
         if(!peers_table_has_neighbour(id,peer->id)){
             peers_table_add_neighbour(id,peer->id);
             peers_table_add_neighbour(peer->id,id);
-            if(pd->neighbours_number>=MIN_NEIGHBOUR_NUMBER) return;
+            if(pd->neighbors_number>=MIN_NEIGHBOUR_NUMBER) return;
         }
         peer = peer->prev;
     }
@@ -451,7 +468,7 @@ int add_peer(struct in_addr addr,int port){
 }
 /*
 Svuota la riga della peers_table identificata con l'id passato, elimina l'id
-dalla lista dei vicini (neighbours_vector) e elimina il relativo peer_elem dalla
+dalla lista dei vicini (neighbors_vector) e elimina il relativo peer_elem dalla
 lista dei peer, ricalcolando i vicini e risolvendo eventuali problemi di 
 isolamento dei peer in testa e coda della lista.
 */
@@ -471,6 +488,39 @@ void remove_peer(int id){
 }
 
 /*
+Genera la lista dei vicini di id e restituisce la dimensione della nuova stringa msg allocata
+Formato messaggio:
+
+<id richiedente>,<numero di vicini>
+<id>,<addr>,<porta>
+...
+<id>,<addr>,<porta>
+
+*/
+uint16_t generate_neighbors_list_message(int id,char* msg){
+    char aux[250]="";
+    pthread_mutex_lock(&table_mutex);
+    struct peer_des* pd = get_peer_des(id);
+    if(pd){
+        struct peer_des* neighbour;
+        sprintf(aux+strlen(aux),"%d,%d\n",id,pd->neighbors_number);
+        for(int i = 0 ; i<pd->neighbors_vector_size;i++){
+            if(pd->neighbors_vector[i]==-1)continue;
+            neighbour = get_peer_des(pd->neighbors_vector[i]);
+            sprintf(aux+strlen(aux),"%d,%u,%d\n",pd->neighbors_vector[i],neighbour->addr.s_addr,neighbour->port);
+        }
+        pthread_mutex_unlock(&table_mutex);
+        msg = malloc(sizeof(char)*(strlen(aux)+1));
+        
+        strcpy(msg,aux);
+        return sizeof(aux)+1;
+    }else{
+        pthread_mutex_unlock(&table_mutex);
+        return 0;
+    }
+}
+
+/*
 Il compito del thread è quello di aspettare richieste dai peer
 e soddisfarle gestendo la peers_list e la peers_table
 Cosa può fare:
@@ -482,10 +532,44 @@ NOTA: è compito del peer contattare il Discovery Server per ottenere
 la lista aggiornata della sua lista dei peer.
 
 */
+
+/*
+Formato del messaggio di richiesta da parte del peer
+<ip:in_addr>,<porta:int>
+
+C'è da fare il conto di ID_BUFFER, ora non ho voglia 
+*/
 void test();
 void* thread_loop(void* arg){
+    //buffers
+    char buffer[DS_BUFFER];
+    char *msg=0;
+    int msg_len;
+    //sockets info
+    int ds_socket,peer_addrlen;
+    struct sockaddr_in ds_addr,peer_addr;
+    int port = 25565;
+    //peer info
+    struct in_addr peer_in_addr;
+    int peer_port=-1;
+    int id;
+    if(open_udp_socket(&ds_socket,&ds_addr,port)){
+        perror("Impossibile aprire socket");
+        loop_flag = 0;
+        pthread_exit(NULL);
+    }
+    peer_addrlen = sizeof(peer_addr);
     while(loop_flag){
-        test();
+        if(recvfrom(ds_socket,buffer,DS_BUFFER,0,(struct sockaddr*)&peer_addr,(int*)&peer_addrlen)<0){
+            continue;
+        }
+        scanf(buffer,"%u,%d",peer_addr.sin_addr,peer_port);
+        id = get_id_by_ip_port(peer_in_addr,peer_port);
+        if(id==-1){//nuovo utente
+            id = add_peer(peer_in_addr,peer_port);
+        }
+        msg_len = generate_neighbors_list_message(id,msg);
+        sendto(ds_socket,msg,msg_len,0,(struct sockaddr*)&peer_addr,(int*)&peer_addrlen);
     }
     pthread_exit(NULL);
 }
@@ -507,7 +591,7 @@ void test(){
 
 
 int find_command(char* command){
-    char* command_list[][SERVER_MAX_COMMAND_SIZE] = SERVER_COMMAND_LIST;
+    char command_list[][SERVER_MAX_COMMAND_SIZE] = SERVER_COMMAND_LIST;
     for(int i = 0; i<SERVER_COMMANDS_NUMBER; i++){
         if(strcmp(command,command_list[i]) == 0 ) return i;
     }
@@ -515,18 +599,20 @@ int find_command(char* command){
 }
 
 
+
 void user_loop(){
     char msg[40];
     int id;
-    int arg_len;
+    int args_number;
     int command_index;
-    char **args;
+    char args[2][13];
     printf(SERVER_WELCOME_MSG);
     while(loop_flag){
-        printf(">>");
-        scanf("%s",msg);
-        arg_len = my_parser(&args,msg);
-        if(arg_len>0){
+        printf(">> ");
+        fgets(msg, 40, stdin);
+        args_number = sscanf(msg,"%s %s",args[0],args[1]);
+        // arg_len = my_parser(&args,msg);
+        if(args_number>0){
             command_index = find_command(args[0]);
         }else{
             command_index = -1;
@@ -539,21 +625,22 @@ void user_loop(){
             peers_list_print();
             break;
             case 2://showneighbor
-            if(arg_len < 2){
+            if(args_number < 2){
                 printf("Manca l'ID\n");
                 break;
             }
-            if(arg_len > 2){
-                printf("rivelato garbage dopo il secondo argomento\n");
-            }
             id = atoi(args[1]);
-            if(id>=peers_number){
+            if(id<0 || id>=peers_number){
                 printf("ID non riconosciuto!\n");
             }
             peers_table_print_peer_neighbor(id);
             break;
             case 3://esc
             loop_flag = 0;
+            printf("Chiusura in corso...\n");
+            break;
+            case 4://showpeersinfo
+            peers_table_print_all_peers();
             break;
             default:
             printf("Comando non riconosciuto!\n");
@@ -574,10 +661,10 @@ int main(int argc, char* argv[]){
         perror("Errore nella creazione del thread");
         exit(EXIT_FAILURE);
     }
-    sleep(5);
     user_loop();
     pthread_join(service_thread,&thread_ret);
     globals_free();
+    printf("Ciao, ciao!\n");
    /* int s_id,c_id,len;
     char buffer[1024];
     struct sockaddr_in s_addr;
