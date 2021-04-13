@@ -13,4 +13,11 @@
 #define DS_BUFFER 255
 #define SERVER_WELCOME_MSG "Discovery Server pronto, benvenuto!\nScrivi comando, ( help per mostrare lista comandi )\n"
 #define SERVER_COMMAND_LIST {"help","showpeers","showneighbor","esc","showpeersinfo"}
-#define SERVER_HELP_MSG "showpeers : mostra la lista dei peers ordinata per porta\nshowneighbor <ID> : mostra i vicini del peer richiesto\nshowpeersinfo: mostra nel dettaglio le informazioni di tutti i peers\nesc: chiudi il server\n"
+#define SERVER_HELP_MSG "showpeers : mostra la lista dei peers ordinata per porta\nshowneighbor <ID> : mostra i vicini del peer richiesto\nshowpeersinfo : mostra nel dettaglio le informazioni di tutti i peers\nesc: chiudi il server\n"
+#define DEFAULT_TIME_TO_LIVE 20
+// Peer consts
+#define DEFAULT_DS_PORT 4242
+#define DEFAULT_PEER_PORT 25566
+#define PEER_COMMANDS_NUMBER 3
+#define PEER_MAX_COMMAND_SIZE 6
+#define PEER_COMMAND_LIST {"start","add","get"}
