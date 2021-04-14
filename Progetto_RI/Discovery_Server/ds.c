@@ -97,19 +97,39 @@ void timer_list_update(){
     }
 }
 
+void timer_list_print(){
+    struct timer_elem* cur;
+    cur = timer_list;
+    printf("Timer elemems\n");
+    while(cur){
+        printf("[ %d,%d ]",cur->id,cur->time_to_live);
+        cur = cur->next;
+    }
+    printf("Ciaone\n");
+}
+
 void timer_list_delete(int id){
     struct timer_elem* elem;
+    printf("____Before remove\n");
+    timer_list_print();
     elem = timer_list_check_and_remove(id);
+    printf("____After\n");
+    timer_list_print();
     if(elem!=NULL) free(elem);
 }
 
 void timer_list_add(int id){
+    printf("Provo ad aggiunger %d alla timer list\n",id);
     struct timer_elem *elem,*cur,*prev;
     elem = timer_list_check_and_remove(id);
     if(elem == NULL){//Nuovo inserimento
+        printf("Nuovo inserimento\n");
         elem = malloc(sizeof(struct timer_elem));
+        elem->id = id;
     }
     elem->time_to_live = DEFAULT_TIME_TO_LIVE;
+    elem->next = NULL;
+    printf("Aggiungo [%d,%d]",elem->id,elem->time_to_live);
     cur = timer_list;
     prev = NULL;
     while(cur){
@@ -379,18 +399,19 @@ Raddoppiamo la sua grandezza moltiplicando per due neighbors_vector_size
 void peers_table_remove_neighbour(int id, int neighbour_id){
     struct peer_des *pd;
     pthread_mutex_lock(&table_mutex);
-    if(id>=peers_table_size){pthread_mutex_unlock(&table_mutex);return;}
+    if(id>=peers_table_size || neighbour_id>=peers_table_size){pthread_mutex_unlock(&table_mutex);return;}
     pd = &peers_table[id];
-    if(pd->port == -1){ pthread_mutex_unlock(&table_mutex);return;}
+    if(pd->port == -1){pthread_mutex_unlock(&table_mutex);return;}
     for(int i = 0 ; i<pd->neighbors_vector_size;i++){
         if(pd->neighbors_vector[i] == neighbour_id){
             pd->neighbors_vector[i] = -1;
             pd->neighbors_number--;
             pthread_mutex_unlock(&table_mutex);
+            printf("OK\n");
             return;
         }
     }
-    pthread_mutex_unlock(&table_mutex);   
+    pthread_mutex_unlock(&table_mutex);
 }
 
 // Controlla se il peer id ha come vicino neighbour_id
@@ -471,39 +492,43 @@ void peers_list_add(struct peer_elem* new_peer){
     }
     pthread_mutex_unlock(&list_mutex);
 }
-
+void peers_list_print();
 void peers_list_remove(int id){
     struct peer_elem *peer, *prev_peer;
     pthread_mutex_lock(&list_mutex);
     peer = peers_list;
     prev_peer = NULL;
     while(peer != NULL){
-        if( peer->id != id)break;
+        if( peer->id == id)break;
         prev_peer = peer;
         peer = peer->next;
     }
     printf("list_remove uscito dal primo loop\n");
-    if(prev_peer!=NULL){
-        prev_peer->next = peer->next;
-    }else{
+    if(peer==NULL){//niente da eliminare
+        printf("%d non è nella lista\n",peer->id);
+        peers_list_print();
+        pthread_mutex_unlock(&list_mutex);
+        return;
+    }else if(prev_peer==NULL){
         peers_list = peer->next;
+        if(peer->next !=NULL) peer->next->prev = NULL;
+    } else{
+        prev_peer->next = peer->next;
+        if(peer->next!=NULL){
+            peer->next->prev = prev_peer;
+            //Aggiorno la loro row nella peers_table
+            // Il precedente e il successivo peer del peer eliminato potrebbero
+            // Diventare nuovi vicini (se non lo sono già)
+            if(!peers_table_has_neighbour(prev_peer->id,peer->next->id)){
+                peers_table_add_neighbour(prev_peer->id,peer->next->id);
+            }
+            if(!peers_table_has_neighbour(peer->next->id,prev_peer->id)){
+                peers_table_add_neighbour(peer->next->id,prev_peer->id);
+            }
+        }
     }
-    if(peer->next!=NULL){
-        peer->next->prev = prev_peer;
-    }else{
-        peers_list_tail = prev_peer;
-    }
-    if(prev_peer!=NULL && peer->next!=NULL){
-// Aggiorno la lista dei vicini
-// Il precedente e il successivo peer del peer eliminato potrebbero
-// Diventare nuovi vicini (se non lo sono già)
-    if(!peers_table_has_neighbour(prev_peer->id,peer->next->id)){
-        peers_table_add_neighbour(prev_peer->id,peer->next->id);
-    }
-    if(!peers_table_has_neighbour(peer->next->id,prev_peer->id)){
-        peers_table_add_neighbour(peer->next->id,prev_peer->id);
-    }
-    }
+    printf("Rimuovo %d dalla lista\n",peer->id);
+    free(peer);
     pthread_mutex_unlock(&list_mutex);
 }
 
@@ -517,14 +542,12 @@ void fix_head_isolation(){
     pthread_mutex_lock(&list_mutex);
     if(peers_number<2) {pthread_mutex_unlock(&list_mutex);return;}
     if(peers_list == NULL) {pthread_mutex_unlock(&list_mutex);return;}
-    printf("prima di ->next\n");
     struct peer_elem *peer = peers_list->next;
     int id = peers_list->id;
-    printf("descrittore...%d\n",id);
+    printf("In testa...%d\n",id);
     struct peer_des *pd = get_peer_des(id);
     //Se possiede la quantità minima di vicini salto il controllo
     if(pd->neighbors_number>=MIN_NEIGHBOUR_NUMBER){pthread_mutex_unlock(&list_mutex);return;}
-    printf("loop...\n");
     while(peer!=NULL){
         //printf("Sono %d e forse ho trovato un nuovo amichetto %d\n",id,peer->id);
         if(!peers_table_has_neighbour(id,peer->id)){
@@ -535,7 +558,6 @@ void fix_head_isolation(){
         }
         peer = peer->next;
     }
-    printf("fine loop...\n");
     pthread_mutex_unlock(&list_mutex);
 }
 /*
@@ -612,20 +634,19 @@ lista dei peer, ricalcolando i vicini e risolvendo eventuali problemi di
 isolamento dei peer in testa e coda della lista.
 */
 void remove_peer(int id){
-    printf("remove peer\n");
+    printf("remove peer %d\n",id);
     peers_table_remove_peer(id);
     for(int i = 0 ; i<peers_table_size;i++){
         if(id == i)continue;
-        printf("remove %d from %dr\n",id,i);
         peers_table_remove_neighbour(i,id);
     }
-    printf("uscito loop entro in list_remove\n");
+    printf("Peers_table aggiornata\nentro in list_remove %d\n",id);
     peers_list_remove(id);
-    printf("uscito, entro in fix head\n");
+    printf("Entro in fix head\n");
     fix_head_isolation();
-    printf("uscito, entro in fix tail\n");
+    printf("Entro in fix tail\n");
     fix_tail_isolation();
-    printf("uscito, entro in timer_list_delete\n");
+    printf("Entro in timer_list_delete\n");
     timer_list_delete(id);
 }
 
@@ -747,9 +768,7 @@ Il peer rinnova il suo time_to_live inviando un pacchetto apposito al DS
 void * thread_timer_loop(void* arg){
     while(loop_flag){
         sleep(1);
-        printf("sveglio\n");
         timer_list_update();
-        printf("uscito da list_update\n");
     }
     return(NULL);
 }
