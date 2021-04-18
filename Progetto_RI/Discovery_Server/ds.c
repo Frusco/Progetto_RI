@@ -762,18 +762,24 @@ void* thread_ds_loop(void* arg){
     }
     printf("[DS_Thread]: Socket UDP aperta alla porta: %d\n",port);
     peer_addrlen = sizeof(peer_addr);
-    thread_test();
+    //thread_test();
     while(loop_flag){
+        printf("in attesa di un pacchetto\n");
         if(recvfrom(ds_socket,buffer,DS_BUFFER,0,(struct sockaddr*)&peer_addr,&peer_addrlen)<0){
+            perror("Errore nella ricezione");
             continue;
         }
         if(strcmp(buffer,"exit")==0){ 
             printf("[DS_Thread]: Ricosciuto comando di uscita\n");
             continue;
         }
-        scanf(buffer,"%u,%d,%c",peer_addr.sin_addr,peer_port,option);
+        printf("Ho ricevuto qualcosa %s\n",buffer);
+        sscanf(buffer,"%u,%d,%c",&peer_addr.sin_addr.s_addr,&peer_port,&option);
+        printf("stringa ricevuta\n %s",buffer);
         id = get_id_by_ip_port(peer_in_addr,peer_port);
+        printf("%d\n%u\n%d\n%c",id,peer_addr.sin_addr.s_addr,peer_port,option);
         if(id==-1){//nuovo utente
+            printf("Nuovo utente\n");
             id = add_peer(peer_in_addr,peer_port);
         }else if(option == 'r'){//Refresha il time_to_live del peer
             timer_list_add(id);
@@ -840,7 +846,7 @@ void send_exit_packet(int ds_port){
 Loop che gestisce l'interfaccia utente
 */
 void user_loop(int port){
-    char msg[40];
+    //char msg[40];
     int id;
     int args_number;
     int command_index;
@@ -848,8 +854,8 @@ void user_loop(int port){
     printf(SERVER_WELCOME_MSG);
     while(loop_flag){
         printf(">> ");
-        fgets(msg, 40, stdin);
-        args_number = sscanf(msg,"%s %s",args[0],args[1]);
+        // fgets(msg, 40, stdin);
+        args_number = scanf("%s %s",args[0],args[1]);
         // arg_len = my_parser(&args,msg);
         if(args_number>0){
             command_index = find_command(args[0]);
