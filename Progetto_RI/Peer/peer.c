@@ -15,10 +15,13 @@
 ### Neighbors struct ############################
 */
 int my_id;
+int my_port;
 int loop_flag;
 fd_set master;
 fd_set reading;
 pthread_mutex_t fd_mutex;
+pthread_t ds_comunication_thread;
+pthread_t comunication_thread;
 struct neighbour{
     int id;
     struct sockaddr_in addr;
@@ -166,8 +169,11 @@ struct sockaddr ds_addr;
 */
 void globals_init(){
     my_id =-1;
+    my_port = -1;
     neighbors_number = 0;
     loop_flag = 1;
+    ds_comunication_thread = 0;
+    comunication_thread = 0;
     FD_ZERO(&master);
     FD_ZERO(&reading);
     neighbors_list = NULL;
@@ -214,15 +220,15 @@ void send_exit_packet(int ds_port){
     sendto(socket,msg,5,0,(struct sockaddr*)&ds_addr,ds_addrlen);
     close(socket);
 }
-
-
-void user_loop(int port){
+*/
+void* ds_comunication_loop(void*arg);
+void user_loop(){
     char msg[40];
-    int id;
+    int port;
     int args_number;
     int command_index;
     char args[2][13];
-    printf(SERVER_WELCOME_MSG);
+    printf(PEER_WELCOME_MSG);
     while(loop_flag){
         printf(">> ");
         fgets(msg, 40, stdin);
@@ -236,34 +242,34 @@ void user_loop(int port){
         switch(command_index){//Gestione dei comandi riconosciuti
             //__help__
             case 0:
-                printf(SERVER_HELP_MSG);
+                printf(PEER_HELP_MSG);
                 break;
-            //__showpeers__
+            //__start__
             case 1:
-                peers_list_print();
-                break;
-            //__showneighbor__
-            case 2:
                 if(args_number < 2){
-                    printf("Manca l'ID\n");
+                    printf("Manca la porta del DS\n");
                     break;
                 }
-                id = atoi(args[1]);
-                if(id<0 || id>=peers_number){
-                    printf("ID non riconosciuto!\n");
+                port = atoi(args[1]);
+                if(pthread_create(&ds_comunication_thread,NULL,ds_comunication_loop,(void*)&port)){
+                    perror("Errore nella creazione del thread\n");
+                    exit(EXIT_FAILURE);
                 }
-                peers_table_print_peer_neighbor(id);
+                break;
+            //__add__
+            case 2:
+                printf("to do\n");
+            break;
+            //__get__
+            case 3:
+                printf("to do\n");
+                
             break;
             //__esc__
-            case 3:
+            case 4:
                 loop_flag = 0;
                 printf("Chiusura in corso...\n");
-                send_exit_packet(port);
                 sleep(1);
-            break;
-            //__showpeersinfo__
-            case 4:
-                peers_table_print_all_peers();
             break;
             //__comando non riconosciuto__
             default:
@@ -275,7 +281,7 @@ void user_loop(int port){
 
 
 }
-*/
+
 void send_exit_packet(int ds_port){
     char msg[5] = "exit";
     int socket;
@@ -294,9 +300,46 @@ void send_exit_packet(int ds_port){
     close(socket);
 }
 
+/*
+DS formato messaggio
+<id>,<numero vicini>
+<id_vicino>,<indirizzo>,<porta>
+... (ripetuto per <numero vicini0>)
+<id_vicino>,<indirizzo>,<porta>
+*/
 
 
-void* ds_comunication_loop(void*args){
+
+void update_neighbors(char*msg){
+    char aux[100];
+    struct neighbour *n;
+    struct in_addr neig_addr;
+    int id,port;
+    id = port = -1;
+    unsigned long index = 0;
+    int entries_number;
+    sscanf(msg,"%s\n",aux);
+    sscanf(aux,"%d,%d",&my_id,&entries_number);
+    index = strlen(aux);
+    for(int i = 0; i<entries_number;i++){
+        sscanf(msg+index,"%s\n",aux);
+        printf("Leggo riga %s\n",aux);
+        sscanf(aux,"%d,%u,%d",&id,&neig_addr.s_addr,&port);
+        /*-1 perché non conosciamo la socket*/
+        n = add_neighbour(id,-1,neig_addr,port);
+        index += strlen(aux);
+    }
+}
+
+/*
+DS formato messaggio
+<id>,<numero vicini>
+<id_vicino>,<indirizzo>,<porta>
+... (ripetuto per <numero vicini0>)
+<id_vicino>,<indirizzo>,<porta>
+*/
+
+void* ds_comunication_loop(void*arg){
     printf("Sono il thread!\n");
     char buffer[DS_BUFFER];
     int socket,port,ds_port;
@@ -304,12 +347,25 @@ void* ds_comunication_loop(void*args){
     char option;
     struct sockaddr_in addr,ds_addr;
     inet_pton(AF_INET,LOCAL_HOST,&addr.sin_addr);
-    port = DEFAULT_PORT+5;
-    if(open_udp_socket(&socket,&addr,port)<0){
-        perror("Impossibile connettersi al Discovery Server");
-        pthread_exit(NULL);
+    port = MIN_PORT;
+    //Apro una socket udp per riceve i messaggi da DS
+    while(port<MAX_PORT){
+        //Continuo a ciclare finché non trovo una porta libera oppure
+        //Finisco le porte
+        if(open_udp_socket(&socket,&addr,port)<0){
+            if(port<MAX_PORT){
+                port++;
+                continue;
+            }else{
+                perror("Impossibile connettersi al Discovery Server");
+                pthread_exit(NULL);
+            }
+        }
+        break;
     }
-    ds_port = DEFAULT_PORT;
+    //Costruisco l'indirizzo al DS
+    ds_port = *(int*)arg;
+    printf("la porta è %d",ds_port);
     ds_addr.sin_family = AF_INET; //Tipo di socket
     ds_addr.sin_port = htons(ds_port);//Porta
     inet_pton(AF_INET,LOCAL_HOST,&ds_addr.sin_addr);
@@ -317,14 +373,16 @@ void* ds_comunication_loop(void*args){
     printf("entro nel loopp\n");
     while(loop_flag){
         option = (neighbors_number<2)?'x':'r';
-        sprintf(buffer,"%u,%d,%c",addr.sin_addr.s_addr,port,option);
+        sprintf(buffer,"%u,%d,%c",addr.sin_addr.s_addr,my_port,option);
         printf("Invio...\n");
         sendto(socket,&buffer,strlen(buffer)+1,0,(struct sockaddr*)&ds_addr,ds_addrlen);
         printf("Aspetto e ricevo\n");
         if(recvfrom(socket,buffer,DS_BUFFER,0,(struct sockaddr*)&ds_addr,&ds_addrlen)<0){
             continue;
         }
-        printf("%s",buffer);
+        if(option!='r'){
+            update_neighbors(buffer);
+        }
         sleep(5);
     }
     close(socket);
@@ -333,23 +391,16 @@ void* ds_comunication_loop(void*args){
 
 
 int main(int argc, char* argv[]){
-    pthread_t ds_comunication_thread;
-    pthread_t comunication_thread;
-    int port;
+    
+    printf("%ld\n",comunication_thread);
     void* thread_ret;
     globals_init();
     if(argc>1){
-        port = atoi(argv[1]);
+        my_port = atoi(argv[1]);
     }else{
-        port = DEFAULT_PORT;
+        my_port = DEFAULT_PORT;
     }
-    if(pthread_create(&ds_comunication_thread,NULL,ds_comunication_loop,(void*)&port)){
-        perror("Errore nella creazione del thread\n");
-        exit(EXIT_FAILURE);
-    }
-    sleep(1);
-    loop_flag = 0;
-    //user_loop(port);
+    user_loop();
     pthread_join(ds_comunication_thread,&thread_ret);
     globals_free();
     printf("Ciao, ciao!\n");

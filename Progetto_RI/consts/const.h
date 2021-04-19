@@ -18,6 +18,8 @@
 // Peer consts
 #define DEFAULT_DS_PORT 4242
 #define DEFAULT_PEER_PORT 25566
-#define PEER_COMMANDS_NUMBER 3
+#define PEER_COMMANDS_NUMBER 5
 #define PEER_MAX_COMMAND_SIZE 6
-#define PEER_COMMAND_LIST {"start","add","get"}
+#define PEER_WELCOME_MSG "Peer pronto, benvenuto!\nScrivi comando, ( help per mostrare lista comandi )\n"
+#define PEER_HELP_MSG "start porta : \nadd : \nget :\nesc: chiudi il peer\n"
+#define PEER_COMMAND_LIST {"help","start","add","get","esc"}

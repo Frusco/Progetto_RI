@@ -206,8 +206,12 @@ pthread_mutex_t table_mutex;
 
 //Restituisce un puntatore al descritore di peer con l'id passato ( se esiste )
 struct peer_des* get_peer_des(int id){
-    if(id >= peers_table_size) return NULL; // Indice troppo altro rispetto alla grandezza della tabella
-    if(peers_table[id].port == -1) return NULL; // elemento vuoto della peers_table
+    if(id >= peers_table_size){
+        return NULL;
+    }  // Indice troppo altro rispetto alla grandezza della tabella
+    if(peers_table[id].port == -1){
+        return NULL;
+    }  // elemento vuoto della peers_table
     return &peers_table[id];
 }
 
@@ -334,7 +338,7 @@ int peers_table_add_peer(struct in_addr addr, int port){
     int i;
     int backup_peers_table_size;
     void * aux;
-     pthread_mutex_lock(&table_mutex);
+    pthread_mutex_lock(&table_mutex);
     for(i = 0 ; i<peers_table_size;i++){
         if(peers_table[i].port==-1){// trovata riga libera
             populate_peers_table_row(i,addr,port);
@@ -639,7 +643,7 @@ int add_peer(struct in_addr addr,int port){
     int id;
     struct peer_elem *pe;
 
-   
+    
     id = peers_table_add_peer(addr,port);
     pe = peer_elem_init(id,port);
 
@@ -677,7 +681,7 @@ Formato messaggio:
 <id>,<addr>,<porta>
 
 */
-uint16_t generate_neighbors_list_message(int id,char* msg){
+uint16_t generate_neighbors_list_message(int id,char** msg){
     pthread_mutex_lock(&table_mutex);
     char aux[250]="";
     struct peer_des* pd = get_peer_des(id);
@@ -690,9 +694,8 @@ uint16_t generate_neighbors_list_message(int id,char* msg){
             sprintf(aux+strlen(aux),"%d,%u,%d\n",pd->neighbors_vector[i],neighbour->addr.s_addr,neighbour->port);
         }
         
-        msg = malloc(sizeof(char)*(strlen(aux)+1));
-        
-        strcpy(msg,aux);
+        *msg = malloc(sizeof(char)*(strlen(aux)+1));
+        strcpy(*msg,aux);
         pthread_mutex_unlock(&table_mutex);
         return sizeof(aux)+1;
     }else{
@@ -756,7 +759,7 @@ void* thread_ds_loop(void* arg){
     int peer_port=-1;
     int id;
     if(open_udp_socket(&ds_socket,&ds_addr,port)){
-        perror("[DS_Thread]: Impossibile aprire socket\n");
+        perror("[DS_Thread]: Impossibile aprire socket");
         loop_flag = 0;
         pthread_exit(NULL);
     }
@@ -764,28 +767,25 @@ void* thread_ds_loop(void* arg){
     peer_addrlen = sizeof(peer_addr);
     //thread_test();
     while(loop_flag){
-        printf("in attesa di un pacchetto\n");
         if(recvfrom(ds_socket,buffer,DS_BUFFER,0,(struct sockaddr*)&peer_addr,&peer_addrlen)<0){
-            perror("Errore nella ricezione");
+            perror("[DS_Thread]: Errore nella ricezione");
             continue;
         }
         if(strcmp(buffer,"exit")==0){ 
             printf("[DS_Thread]: Ricosciuto comando di uscita\n");
             continue;
         }
-        printf("Ho ricevuto qualcosa %s\n",buffer);
         sscanf(buffer,"%u,%d,%c",&peer_addr.sin_addr.s_addr,&peer_port,&option);
-        printf("stringa ricevuta\n %s",buffer);
         id = get_id_by_ip_port(peer_in_addr,peer_port);
-        printf("%d\n%u\n%d\n%c",id,peer_addr.sin_addr.s_addr,peer_port,option);
         if(id==-1){//nuovo utente
-            printf("Nuovo utente\n");
             id = add_peer(peer_in_addr,peer_port);
-        }else if(option == 'r'){//Refresha il time_to_live del peer
+        }else{//Refresha il time_to_live del peer
             timer_list_add(id);
         }
-        msg_len = generate_neighbors_list_message(id,msg);
-        sendto(ds_socket,msg,msg_len,0,(struct sockaddr*)&peer_addr,peer_addrlen);
+        if(option != 'r'){// Se diverso da r ( Refresh timer_list ) richiede anche la lista dei vicini
+            msg_len = generate_neighbors_list_message(id,&msg);
+            sendto(ds_socket,msg,msg_len,0,(struct sockaddr*)&peer_addr,peer_addrlen);
+        } 
     }
     close(ds_socket);
     pthread_exit(NULL);
@@ -927,7 +927,7 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
     sleep(1);
-    user_loop(port);
+    if(loop_flag) user_loop(port);
     pthread_join(service_thread,&thread_ret);
     pthread_join(timer_thread,&thread_ret);
     globals_free();
