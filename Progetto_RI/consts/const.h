@@ -23,3 +23,4 @@
 #define PEER_WELCOME_MSG "Peer pronto, benvenuto!\nScrivi comando, ( help per mostrare lista comandi )\n"
 #define PEER_HELP_MSG "start porta : \nadd : \nget :\nesc: chiudi il peer\n"
 #define PEER_COMMAND_LIST {"help","start","add","get","esc"}
+#define PACKET_MASK 0x00000000FFFFFFFF // <3 byte liberi><1 byte tipo operazione><4 byte lunghezza pacchetto>
