@@ -15,12 +15,17 @@ DISCOVERY SERVER:
 */
 
 pthread_mutex_t timer_mutex;
+
 struct timer_elem{
+    //Id del peer
     int id;
+    //Secondi rimanenti di vita
     int time_to_live;
+    //Puntatore al prossimo timer_elem
     struct timer_elem* next;
 };
 struct timer_elem* timer_list;
+
 
 /*
 Controlla se il peer è nella lista del timer
@@ -180,12 +185,18 @@ int id è l'indice della peers_table
 int port è il valore che definisce l'ordinamento
 */
 struct peer_elem{
+    //Id del peer
     int id;
+    //porta del peer ( utilizzata per l'ordinamento )
     int port;
+    //Prossimo elemento
     struct peer_elem* next;
+    //Elemento precedente
     struct peer_elem* prev;
 };
+//Puntatore alla testa della lista di peer_elem
 struct peer_elem* peers_list;
+//Puntatore alla coda della lista di peer_elem
 struct peer_elem* peers_list_tail;
 pthread_mutex_t list_mutex;
 
@@ -193,11 +204,16 @@ pthread_mutex_t list_mutex;
 Descrittore di un peer
 */
 struct peer_des{
+    // Indirizzo del peer
     struct in_addr addr;
+    // Porta del peer
     int port;
-    int neighbors_number; //Numero dei vicini
+    //Numero dei vicini
+    int neighbors_number;
+    //Dimensione del neighbors_vector 
     int  neighbors_vector_size;
-    int* neighbors_vector; //Array dinamico degli id dei vicini
+    //Array dinamico degli id dei vicini
+    int* neighbors_vector;
 };
 int peers_number; //Il numero dei peer attualmente nelle rete
 int peers_table_size; //La grandezza della peers_table
