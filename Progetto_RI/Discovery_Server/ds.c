@@ -181,11 +181,9 @@ void timer_list_add(int id){
 
 /*
 Elemento che definisce un peer in una lista ordinata
-int id è l'indice della peers_table
-int port è il valore che definisce l'ordinamento
 */
 struct peer_elem{
-    //Id del peer
+    //Id del peer ( indice della peers_table )
     int id;
     //porta del peer ( utilizzata per l'ordinamento )
     int port;
@@ -215,9 +213,12 @@ struct peer_des{
     //Array dinamico degli id dei vicini
     int* neighbors_vector;
 };
-int peers_number; //Il numero dei peer attualmente nelle rete
-int peers_table_size; //La grandezza della peers_table
-struct peer_des* peers_table; //Tabella dei descrittori di peer
+//Il numero dei peer attualmente nelle rete
+int peers_number;
+//La grandezza della peers_table
+int peers_table_size; 
+//Tabella dei descrittori di peer
+struct peer_des* peers_table; 
 pthread_mutex_t table_mutex;
 
 //Restituisce un puntatore al descritore di peer con l'id passato ( se esiste )
@@ -712,6 +713,7 @@ uint16_t generate_neighbors_list_message(int id,char** msg){
         
         *msg = malloc(sizeof(char)*(strlen(aux)+1));
         strcpy(*msg,aux);
+        printf("La lista dei vicini:\n%s",*msg);
         pthread_mutex_unlock(&table_mutex);
         return sizeof(aux)+1;
     }else{
@@ -862,7 +864,7 @@ void send_exit_packet(int ds_port){
 Loop che gestisce l'interfaccia utente
 */
 void user_loop(int port){
-    //char msg[40];
+    char msg[40];
     int id;
     int args_number;
     int command_index;
@@ -870,8 +872,9 @@ void user_loop(int port){
     printf(SERVER_WELCOME_MSG);
     while(loop_flag){
         printf(">> ");
-        // fgets(msg, 40, stdin);
-        args_number = scanf("%s %s",args[0],args[1]);
+        fgets(msg, 40, stdin);
+        args_number = sscanf(msg,"%s %s",args[0],args[1]);
+        //args_number = scanf("%s",args[0],args[1]);
         // arg_len = my_parser(&args,msg);
         if(args_number>0){
             command_index = find_command(args[0]);
