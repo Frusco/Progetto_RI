@@ -868,7 +868,7 @@ void user_loop(int port){
     int id;
     int args_number;
     int command_index;
-    char args[2][13];
+    char args[2][SERVER_MAX_COMMAND_SIZE];
     printf(SERVER_WELCOME_MSG);
     while(loop_flag){
         printf(">> ");

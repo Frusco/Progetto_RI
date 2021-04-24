@@ -14,7 +14,7 @@
 #define SERVER_WELCOME_MSG "Discovery Server pronto, benvenuto!\nScrivi comando, ( help per mostrare lista comandi )\n"
 #define SERVER_COMMAND_LIST {"help","showpeers","showneighbor","esc","showpeersinfo"}
 #define SERVER_HELP_MSG "showpeers : mostra la lista dei peers ordinata per porta\nshowneighbor <ID> : mostra i vicini del peer richiesto\nshowpeersinfo : mostra nel dettaglio le informazioni di tutti i peers\nesc: chiudi il server\n"
-#define DEFAULT_TIME_TO_LIVE 20
+#define DEFAULT_TIME_TO_LIVE 5
 // Peer consts
 #define DEFAULT_DS_PORT 4242
 #define DEFAULT_PEER_PORT 25566
@@ -24,3 +24,5 @@
 #define PEER_HELP_MSG "start porta : \nadd : \nget :\nesc: chiudi il peer\n"
 #define PEER_COMMAND_LIST {"help","start","add","get","esc"}
 #define PACKET_MASK 0x00000000FFFFFFFF // <3 byte liberi><1 byte tipo operazione><4 byte lunghezza pacchetto>
+#define DS_COMUNICATION_LOOP_SLEEP_TIME 2
+#define DEFAULT_SELECT_WAIT_TIME 5;
