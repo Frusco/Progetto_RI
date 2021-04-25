@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
 
 /*
 ### Neighbors struct ############################
@@ -36,6 +37,11 @@ pthread_mutex_t neighbors_list_mutex;
 int neighbors_number;
 struct neighbour* neighbors_list;
 
+/**
+ * @brief  Stampa la lista dei vicini
+ * @note   
+ * @retval None
+ */
 void neighbors_list_print(){
     struct neighbour*cur;
     pthread_mutex_lock(&neighbors_list_mutex);
@@ -68,7 +74,15 @@ struct neighbour* neighbour_init_and_connect(int id,struct in_addr addr,int port
     }
 }
 
-
+/**
+ * @brief  Inizializza un nuovo vicino quando questo si presenta al peer con un greeting_message
+ * @note   Vedi send_greeting_message
+ * @param  id:int l'identificativo del peer
+ * @param  socket:int la socket del peer
+ * @param  addr:in_addr l'indirizzo del peer 
+ * @param  s_port:int la porta del peer 
+ * @retval  neighbour* puntatore al nuovo vicino allocato
+ */
 struct neighbour* neighbour_init(int id,int socket,struct in_addr addr,int s_port){
     struct neighbour *n = malloc(sizeof(struct neighbour));
     n->id = id;
@@ -82,7 +96,12 @@ struct neighbour* neighbour_init(int id,int socket,struct in_addr addr,int s_por
 }
 
 
-// inserimento in coda
+/**
+ * @brief  Inserimento in coda di un nuovo vicino nella neighbors_list
+ * @note   
+ * @param  n:neighbour* puntatore al vicino da inserire 
+ * @retval None
+ */
 void neighbors_list_add(struct neighbour* n){
     struct neighbour*cur,*prev;
     cur = neighbors_list;
@@ -126,6 +145,12 @@ struct neighbour* neighbors_list_remove(int id){
     return ret;
 }
 
+/**
+ * @brief Restituisce un vicino dato l'id se presente nella neighbors_list
+ * @note   
+ * @param  id:int l'ID del vicino richiesto 
+ * @retval neighbour* puntatore al vicino richiesto, NULL se non è presente
+ */
 struct neighbour* get_neighbour_by_id(int id){
     struct neighbour*cur;
     cur = neighbors_list;
@@ -336,6 +361,11 @@ void send_exit_packet(int ds_port){
 */
 void* ds_comunication_loop(void*arg);
 void send_byebye_to_all();
+/**
+ * @brief  Loop con il quale l'utente interagisce con il programma
+ * @note   
+ * @retval None
+ */
 void user_loop(){
     void* ret;
     char msg[40];
@@ -370,6 +400,7 @@ void user_loop(){
                     perror("Errore nella creazione del thread\n");
                     exit(EXIT_FAILURE);
                 }
+                sleep(2);
                 break;
             //__add__
             case 2:
@@ -382,10 +413,10 @@ void user_loop(){
             break;
             //__esc__
             case 4:
+                printf("Chiusura in corso...\n");
                 ds_option_set('b');
                 pthread_join(ds_comunication_thread,&ret);
                 send_byebye_to_all();
-                printf("Chiusura in corso...\n");
                 loop_flag = 0;
                 pthread_join(tcp_comunication_thread,&ret);
                 printf("Socket chiusa\n");
@@ -402,7 +433,8 @@ void user_loop(){
 
 }
 
-void send_exit_packet(int ds_port){
+
+/*void send_exit_packet(int ds_port){
     char msg[5] = "exit";
     int socket;
     socklen_t ds_addrlen;
@@ -418,7 +450,7 @@ void send_exit_packet(int ds_port){
     ds_addrlen = sizeof(ds_addr);
     sendto(socket,msg,5,0,(struct sockaddr*)&ds_addr,ds_addrlen);
     close(socket);
-}
+}*/
 
 /*
     uint64_t prova=0;
@@ -521,6 +553,7 @@ int send_byebye_message(struct neighbour* n){
     return 1;
 }
 
+
 /**
  * @brief  Lancia send_byebye_message(...) a tutti i membri della neighbors_list
  * @note   Vedi send_byebye_message
@@ -547,8 +580,13 @@ DS formato messaggio
 */
 
 
-
-void update_neighbors(char*msg){
+/**
+ * @brief  
+ * @note   
+ * @param  msg:char* stringa contenente  
+ * @retval None
+ */
+void update_neighbors(char* msg){
     char aux[100];
     struct in_addr neig_addr;
     int id,s_port;
@@ -581,6 +619,11 @@ DS formato messaggio
 //Indica il tipo di servezion richiesto al DS
 char ds_option;
 
+/**
+ * @brief  Restituisce il valore di ds_option che specifica il servizio richiesto al DS
+ * @note   vedi ds_comunication_loop
+ * @retval char contentenente l'opzione per quella iterazione
+ */
 char ds_option_get(){
     char c;
     pthread_mutex_lock(&ds_mutex);
@@ -588,6 +631,12 @@ char ds_option_get(){
     pthread_mutex_unlock(&ds_mutex);
     return c;
 }
+/**
+ * @brief  Setta ds_option che specifica il servizio da richiedere al DS alla prossima iterazione del ds_comunication_loop
+ * @note   vedi ds_comunicazion_llop
+ * @param  c:char tipo di opzione 
+ * @retval None
+ */
 void ds_option_set(char c){
     pthread_mutex_lock(&ds_mutex);
     ds_option = c;
@@ -595,7 +644,10 @@ void ds_option_set(char c){
 }
 
 void* ds_comunication_loop(void*arg){
-    
+    fd_set ds_master;
+    fd_set ds_to_read;
+    int ret;
+    struct timeval timeout;
     char buffer[DS_BUFFER];
     int socket,s_port,ds_port;
     socklen_t ds_addrlen;
@@ -607,7 +659,9 @@ void* ds_comunication_loop(void*arg){
     while(s_port<MAX_PORT){
         //Continuo a ciclare finché non trovo una s_porta libera oppure
         //Finisco le s_porte
-        if(open_udp_socket(&socket,&addr,s_port)<0){
+        printf("Prova apertura socket udp a porta: %d\n",s_port);
+        ret = open_udp_socket(&socket,&addr,s_port);
+        if(ret < 0){
             if(s_port<MAX_PORT){
                 s_port++;
                 continue;
@@ -616,17 +670,22 @@ void* ds_comunication_loop(void*arg){
                 pthread_exit(NULL);
             }
         }
+        printf("Socket udp aperta\n");
         break;
     }
+    FD_ZERO(&ds_master);
+    FD_ZERO(&ds_to_read);
+    FD_SET(socket,&ds_master);
+    
+    timeout.tv_usec = 0;
     //Costruisco l'indirizzo al DS
     ds_port = *(int*)arg;
-    printf("la s_porta è %d",ds_port);
     ds_addr.sin_family = AF_INET; //Tipo di socket
     ds_addr.sin_port = htons(ds_port);//Porta
     inet_pton(AF_INET,LOCAL_HOST,&ds_addr.sin_addr);
     ds_addrlen = sizeof(ds_addr);
     //option = (neighbors_number<2)?'x':'r';
-    while(loop_flag){
+    /*while(loop_flag){
         option = ds_option_get();
         sprintf(buffer,"%u,%d,%c",addr.sin_addr.s_addr,my_port,option);
         sendto(socket,&buffer,strlen(buffer)+1,0,(struct sockaddr*)&ds_addr,ds_addrlen);
@@ -641,14 +700,43 @@ void* ds_comunication_loop(void*arg){
         if(option == 'b'){//byebye
             break;
         }
-        ds_option_set('r');
+
+        
         sleep(DS_COMUNICATION_LOOP_SLEEP_TIME);
-    }
+    }*/
+    while(loop_flag){
+        option = ds_option_get();
+        sprintf(buffer,"%u,%d,%c",addr.sin_addr.s_addr,my_port,option);
+        sendto(socket,&buffer,strlen(buffer)+1,0,(struct sockaddr*)&ds_addr,ds_addrlen);
+        ds_to_read = ds_master;
+        timeout.tv_sec = DS_COMUNICATION_LOOP_SLEEP_TIME;
+        ret = select(socket+1,&ds_to_read,NULL,NULL,&timeout); //Abbiamo solo una socket nella lista
+        //perror("Select:");
+        if(ret==1){
+            if(option=='x'){//Richiesta della lista dei vicini
+            if(recvfrom(socket,buffer,DS_BUFFER,0,(struct sockaddr*)&ds_addr,&ds_addrlen)<0){
+                printf("Errore nella ricezione");
+                continue;
+            }
+                printf("messaggio ricevuto:\n %s",buffer);
+                update_neighbors(buffer);
+                ds_option_set('r');//Il loop passa in modalità refresh
+            }
+        }
+        if(option == 'b'){//byebye
+            break;
+        }
+    }   
     close(socket);
     pthread_exit(NULL);
 }
 
-
+/**
+ * @brief  Gestisce le richieste dei vicini
+ * @note   vedi tcp_comunication _loop
+ * @param  socket_served:int la socket che richiede un servizio al peer
+ * @retval None
+ */
 void serve_peer(int socket_served){
     char *buffer;
     uint64_t first_packet=0; // contiene la lunghezza del prossimo messaggio e del codice
@@ -659,9 +747,10 @@ void serve_peer(int socket_served){
                     // il prossimo pacchetto
     int peer_id,peer_port;
     struct in_addr peer_addr;
-    printf("Servo %d",socket_served);
+    //printf("Servo %d",socket_served);
     if(recv(socket_served,(void*)&first_packet,sizeof(first_packet),0)<0){
-        perror("Errore in fase di ricezione\n");
+        remove_neighbour(get_neighbour_by_socket(socket_served)->id);
+        ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo amichetto
         return;
     }
     //4 byte di opzioni e 4byte che indica la lunghezza del pacchetto
@@ -669,29 +758,31 @@ void serve_peer(int socket_served){
     len = first_packet & PACKET_MASK;
     options = ntohl(options);
     len = ntohl(len);
-    printf("L'operazione è %d e la lunghezza è %d\n",options,len);
+    //printf("L'operazione è %d e la lunghezza è %d\n",options,len);
     operation =(char) options; // ci serve il primo byte
-    printf("operation %c\n",operation);
+    //printf("operation %c\n",operation);
     switch(operation){
         case 'H': //Nuovo peer (Hello!)
-            printf("Servo un hallo!\n");
             buffer = malloc(sizeof(char)*len);
             if(recv(socket_served,(void*)buffer,len,0)<0){
                 perror("Errore in fase di ricezione\n");
                 return;
             }
-            printf("Il messaggio di saluto %s\n",buffer);
             sscanf(buffer,"%d,%u,%d",&peer_id,&peer_addr.s_addr,&peer_port);
-            printf("Quello che ho letto %d,%u,%d\n",peer_id,peer_addr.s_addr,peer_port);
+            //printf("Quello che ho letto %d,%u,%d\n",peer_id,peer_addr.s_addr,peer_port);
             add_neighbour(peer_id,socket_served,peer_addr,peer_port);
             break;
     case 'P'://Ping
+        printf("Ricevuto un ping da %d\n",socket_served);
         break;
     case 'B'://bye bye
         remove_neighbour(get_neighbour_by_socket(socket_served)->id);
+        ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo amichetto
         break;
     default:
-        return;
+        //Il messaggio non rispetta i protocolli di comunicazione, rimuovo il peer
+        remove_neighbour(get_neighbour_by_socket(socket_served)->id);
+        ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo amichetto
         break;
     }
     
@@ -705,7 +796,7 @@ void * tcp_comunication_loop(void *arg){
     int ret;
     socklen_t len;
     struct timeval timeout;
-    timeout.tv_sec = DEFAULT_SELECT_WAIT_TIME; 
+    timeout.tv_usec = 0;
     ret = open_tcp_server_socket(&s_socket,&s_addr,s_port);
     if(ret<0){
         perror("Errore nella costruzione della server socket\n");
@@ -723,6 +814,7 @@ void * tcp_comunication_loop(void *arg){
         pthread_mutex_lock(&fd_mutex);
         to_read = master;
         pthread_mutex_unlock(&fd_mutex);
+        timeout.tv_sec = DEFAULT_SELECT_WAIT_TIME; 
         ret = select(max_socket+1,&to_read,NULL,NULL,&timeout);
         for(int socket_i = 0; socket_i<=max_socket;socket_i++){
             if(FD_ISSET(socket_i,&to_read)){//Socket ready to read;
@@ -743,7 +835,6 @@ void * tcp_comunication_loop(void *arg){
                 }
             }
         }
-        sleep(1);
     }
     pthread_exit(NULL);
 }

@@ -713,7 +713,7 @@ uint16_t generate_neighbors_list_message(int id,char** msg){
         
         *msg = malloc(sizeof(char)*(strlen(aux)+1));
         strcpy(*msg,aux);
-        printf("La lista dei vicini:\n%s",*msg);
+        //printf("La lista dei vicini:\n%s",*msg);
         pthread_mutex_unlock(&table_mutex);
         return sizeof(aux)+1;
     }else{
@@ -800,7 +800,10 @@ void* thread_ds_loop(void* arg){
         }else{//Refresha il time_to_live del peer
             timer_list_add(id);
         }
-        if(option != 'r'){// Se diverso da r ( Refresh timer_list ) richiede anche la lista dei vicini
+        if(option == 'b'){// Bye Bye message, rimuovo il peer
+            remove_peer(id);
+        }
+        if(option == 'x'){// Se x richiede anche la lista dei vicini
             msg_len = generate_neighbors_list_message(id,&msg);
             sendto(ds_socket,msg,msg_len,0,(struct sockaddr*)&peer_addr,peer_addrlen);
         } 
