@@ -37,6 +37,39 @@ pthread_mutex_t neighbors_list_mutex;
 int neighbors_number;
 struct neighbour* neighbors_list;
 
+struct flooding_elem{
+    //Identifica l'elemento insieme a socket
+    int id;
+    //Identifica l'elemento insieme a id
+    int socket;
+    //Indica se abbiamo ricevuto una risposta dalla socket oppure no
+    int recieved_flag;
+    //Il prossimo elemento nella lista
+    struct flooding_elem* next;
+
+};
+
+struct request{
+    //Insieme a timestamp identifica la richiesta
+    int id;
+    //Insieme a id identifica la richiesta
+    time_t timestamp;
+    //La socket alla quale inviare il risultato completato il flooding;
+    int ret_socket;
+    //La lista delle socket dalle quali attendo una risposta
+    struct flooding_elem* flooding_list;
+    //La dimensione del buffer
+    int buffer_size;
+    //Le risposte che ho ricevuto
+    char* buffer;
+    //Il prossimo elemento in lista
+    struct request* next;
+};
+struct request* requestes_list;
+
+
+
+
 /**
  * @brief  Stampa la lista dei vicini
  * @note   
