@@ -1,3 +1,4 @@
+
 #include "../consts/const.h"
 #include "../libs/my_sockets.h"
 #include "../libs/my_parser.h"
@@ -10,7 +11,8 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <time.h>
+#include <sys/stat.h>
+
 
 /*
 ### Neighbors struct ############################
@@ -37,7 +39,7 @@ pthread_mutex_t neighbors_list_mutex;
 int neighbors_number;
 struct neighbour* neighbors_list;
 
-struct flooding_elem{
+struct flooding_mate{
     //Identifica l'elemento insieme a socket
     int id;
     //Identifica l'elemento insieme a id
@@ -45,7 +47,7 @@ struct flooding_elem{
     //Indica se abbiamo ricevuto una risposta dalla socket oppure no
     int recieved_flag;
     //Il prossimo elemento nella lista
-    struct flooding_elem* next;
+    struct flooding_mate* next;
 
 };
 
@@ -57,7 +59,7 @@ struct request{
     //La socket alla quale inviare il risultato completato il flooding;
     int ret_socket;
     //La lista delle socket dalle quali attendo una risposta
-    struct flooding_elem* flooding_list;
+    struct flooding_mate* flooding_list;
     //La dimensione del buffer
     int buffer_size;
     //Le risposte che ho ricevuto
@@ -68,7 +70,167 @@ struct request{
 struct request* requestes_list;
 
 
+struct entry {
+    //Identifica la entry
+    struct timespec timestamp;
+    char type;
+    unsigned int quantity;
+    struct entry *next;
+};
 
+struct entries_register{
+    time_t creation_date;
+    FILE f;
+    int is_open;
+    unsigned int count;
+    struct entry* entries;
+    struct entries_register *next;
+    
+};
+
+struct entries_register *registers_list;
+
+/**
+ * @brief  Compara due entry
+ * @note   
+ * @param  x:entry*   
+ * @param  y:entry* 
+ * @retval 0: uguali , 1: x>y -1:x<y
+ */
+int entriescmp(struct entry* x,struct entry* y){
+    if(x->timestamp.tv_sec<y->timestamp.tv_sec) return -1;
+    if(x->timestamp.tv_sec>y->timestamp.tv_sec) return 1;
+    if(x->timestamp.tv_nsec<y->timestamp.tv_nsec) return -1;
+    if(x->timestamp.tv_nsec>y->timestamp.tv_nsec) return 1;
+    return 0; //sono uguali
+}
+
+struct entry* entry_init(char type, unsigned int quantity){
+    struct entry* e;
+    if(type!='N' && type!='T') return NULL; //type non valido
+    if(quantity == 0) return NULL; //Entry vuota!
+    e = malloc(sizeof(struct entry));
+    if( e == NULL) return NULL;
+    timespec_get(&e->timestamp,TIME_UTC);
+    //Aggiungo le due ore del nostro fuso orario (in secondi)
+    e->timestamp.tv_sec+=7200;
+    e->quantity = quantity;
+    e->type = type;
+    e->next = NULL;
+    return e;
+}
+
+/**
+ * @brief  Inserisce il record nella lista del registro
+ * @note   
+ * @param  *er:entries_register il registro nel quale inserire il record
+ * @param  *e:entry il record
+ * @retval None
+ */
+int add_entry_in_register(struct entries_register *er,struct entry *e){
+    struct entry* cur;
+    struct entry* prev;
+    int ret;
+    cur = er->entries;
+    prev = NULL;
+    while(cur){
+        ret = entriescmp(cur,e);
+        if(ret == 0) return 0;//entry duplicata
+        if(ret == 1) break;//Siamo arrivati al punto di inserimento
+        prev = cur;
+        cur = cur->next;
+    }
+    if(prev==NULL){
+        er->entries = e;
+    }else{
+        prev->next = e;
+    }
+    e->next = cur;
+    er->count++;
+    return 1;
+}
+
+/**
+ * @brief  Restituisce il Register aperto ( può essere aperto solo un register per volta )
+ * @note   
+ * @retval entries_register* puntatore al registro, NULL se non esiste. 
+ */
+struct entries_register* get_open_register(){
+    struct entries_register* cur;
+    cur = registers_list;
+    while(cur){
+        if(cur->is_open) return cur;
+        else cur = cur->next;
+    }
+    // Nessun registro aperto!
+    return NULL;
+}
+/**
+ * @brief  Carica il register da file
+ * @note   
+ * @param  f: 
+ * @retval 
+ */
+/*struct entries_register* load_register(FILE f){
+    
+}
+void save_register(){
+
+}*/
+
+/**
+ * @brief  Cerca la prima lista aperta della registers_list e inserisce lì il record passato
+ * @note   vedi add_entry_in_register , get_open_register
+ * @param  *e:entry il record da inserire
+ * @retval None
+ */
+int add_entry(struct entry *e){
+    struct entries_register *er = get_open_register();
+    if(er==NULL)return 0;
+    return add_entry_in_register(er,e);
+}
+
+
+
+void registers_list_add(struct entries_register *er){
+    struct entries_register *cur;
+    struct entries_register *prev;
+    cur = registers_list;
+    prev = NULL;
+    while(cur){
+        //È un duplicato, non aggiungiamo nulla
+        if(cur->creation_date==er->creation_date)return;
+        //Siamo arrivati al punto di inserimento
+        if(cur->creation_date>er->creation_date)break;
+        prev = cur;
+        cur = cur->next;
+    }
+    if(prev==NULL){
+        registers_list = er;
+    }else{
+        prev->next = er;
+    }
+    er->next = cur;
+}
+
+void register_list_free(){
+    struct entries_register *cur;
+    struct entries_register *prev;
+    struct entry *e_cur;
+    struct entry *e_prev;
+    cur = registers_list;
+    while(cur){
+        prev = cur;
+        cur = cur->next;
+        e_cur = prev->entries;
+        while(e_cur){
+            e_prev = e_cur;
+            e_cur = e_cur->next;
+            free(e_prev);
+        }
+        free(prev);
+    }
+}
 
 /**
  * @brief  Stampa la lista dei vicini
@@ -900,13 +1062,23 @@ printf("%c,%u",prova>>32,prova & mask);
     return 1;
 */
 
+void generate_work_folder(){
+    char path[10];
+    int result;
+    sprintf(path,"./%d",my_port);
+    printf("%s\n",path);
+    result = mkdir(path, 0777);
+    printf("result = %d\n",result);
+}
+
 int main(int argc, char* argv[]){
-    globals_init();
     if(argc>1){
         my_port = atoi(argv[1]);
     }else{
         my_port = DEFAULT_PORT;
     }
+    generate_work_folder();
+    globals_init();
     if(pthread_create(&tcp_comunication_thread,NULL,tcp_comunication_loop,(void*)&my_port)){
         perror("Errore nella creazione del thread\n");
         exit(EXIT_FAILURE);
