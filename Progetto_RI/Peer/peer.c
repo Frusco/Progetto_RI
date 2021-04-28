@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/stat.h>
-
+#include <dirent.h>
 
 /*
 ### Neighbors struct ############################
@@ -23,6 +23,8 @@ struct in_addr my_addr;
 int loop_flag;
 int max_socket;
 int s_socket;
+char* my_path;
+char* my_log_path;
 fd_set master;
 fd_set to_read;
 pthread_mutex_t fd_mutex;
@@ -80,7 +82,8 @@ struct entry {
 
 struct entries_register{
     time_t creation_date;
-    FILE f;
+    FILE *f;
+    char *path;
     int is_open;
     unsigned int count;
     struct entry* entries;
@@ -141,8 +144,10 @@ int add_entry_in_register(struct entries_register *er,struct entry *e){
         cur = cur->next;
     }
     if(prev==NULL){
+        printf("Nessuno in lista lo aggiungo alla testa %s\n",ctime(&e->timestamp.tv_sec));
         er->entries = e;
     }else{
+        printf("Lo aggiungo dopo a %s -> %s\n",ctime(&prev->timestamp.tv_sec),ctime(&e->timestamp.tv_sec));
         prev->next = e;
     }
     e->next = cur;
@@ -192,14 +197,14 @@ int add_entry(struct entry *e){
 
 
 
-void registers_list_add(struct entries_register *er){
+int registers_list_add(struct entries_register *er){
     struct entries_register *cur;
     struct entries_register *prev;
     cur = registers_list;
     prev = NULL;
     while(cur){
         //È un duplicato, non aggiungiamo nulla
-        if(cur->creation_date==er->creation_date)return;
+        if(cur->creation_date==er->creation_date)return 0;
         //Siamo arrivati al punto di inserimento
         if(cur->creation_date>er->creation_date)break;
         prev = cur;
@@ -211,9 +216,10 @@ void registers_list_add(struct entries_register *er){
         prev->next = er;
     }
     er->next = cur;
+    return 1;
 }
 
-void register_list_free(){
+void registers_list_free(){
     struct entries_register *cur;
     struct entries_register *prev;
     struct entry *e_cur;
@@ -229,6 +235,21 @@ void register_list_free(){
             free(e_prev);
         }
         free(prev);
+    }
+}
+
+void registers_list_print(){
+    struct entries_register *cur;
+    struct entry *e_cur;
+    cur = registers_list;
+    while(cur){
+        e_cur = cur->entries;
+        printf("register: %s",ctime(&cur->creation_date));
+        while(e_cur){
+            printf("entry: %s",ctime(&e_cur->timestamp.tv_sec));
+            e_cur = e_cur->next;
+        }
+        cur = cur->next;
     }
 }
 
@@ -401,6 +422,107 @@ struct neighbour* add_neighbour(int id,int socket,struct in_addr addr,int port) 
     return n;
 }
 
+char* get_file_name(char*path){
+    char *file_name;
+    int s_start = strlen(path);
+    int s_end = strlen(path);
+    char c ;
+    do{
+        s_start--;
+        c = path[s_start];
+    }while(c!='/');
+    s_start++;
+    do{
+        s_end--;
+        c = path[s_end];
+    }while(c!='.');
+    file_name = malloc(sizeof(char)*(s_end-s_start));
+    strncpy(file_name,path+s_start,s_end-s_start);
+    return file_name;
+}
+
+void open_today_register(){
+    struct entries_register *er;
+    int ret;
+    char filename[20];
+    er = malloc(sizeof(struct entries_register));
+    time_t today;
+    struct tm *timeinfo;
+    time(&today);
+    //printf("%s",ctime(&today));
+    timeinfo = localtime(&today);
+    timeinfo->tm_sec = 0;
+    timeinfo->tm_min = 0;
+    timeinfo->tm_hour = 0;
+    today = mktime(timeinfo);
+    //printf("%s",ctime(&today));
+    er->count=0;
+    er->entries = NULL;
+    er->is_open = 1;
+    er->next = NULL;
+    //printf("%s",ctime(&today));
+    do{
+        er->creation_date = today;
+        ret = registers_list_add(er);
+        today+=86400;
+    //La data di oggi potrebbe essere già stata chiusa
+    }while(!ret);
+    //Completiamo l'inizializzazione
+    sprintf(filename,"%ld",er->creation_date);
+    er->path = malloc(sizeof(char)*(strlen(my_path)+strlen(filename)+2));//+7 perché considero anche '/' e "\0" e .txt
+    strcpy(er->path,my_path);
+    strcat(er->path,"/");
+    strcat(er->path,filename);
+    strcat(er->path,".txt");
+    er->f = fopen(er->path,"a");
+}
+/**
+ * @brief  Carica il registro dal file
+ * @note   formato <secondi>.<nano>:<tipo>,<quantità>
+ * @param  path:char* stringa del path 
+ * @retval None
+ */
+struct entries_register* load_register(char* path){
+    struct entries_register *er;
+    struct entry *e;
+    struct entry aux;
+    memset(&aux,0,sizeof(struct entry));
+    er = malloc(sizeof(struct entries_register));
+    char* file_name = get_file_name(path);
+    printf("il path è %s\n il nome del file è %s\n",path,file_name);
+    er->creation_date = atol(file_name);
+    er->path = malloc(sizeof(char)*(strlen(path)+1));
+    strcpy(er->path,path);
+    er->entries = NULL;
+    er->next = NULL;
+    er->is_open = 0;
+    //if(path==NULL) return;
+    er->f = fopen(path,"r");
+    while(fscanf(
+        er->f,
+        "%ld.%ld:%c,%u",
+        &aux.timestamp.tv_sec,
+        &aux.timestamp.tv_nsec,
+        &aux.type,
+        &aux.quantity)!=EOF){
+        printf("Dentro %ld.%ld:%c,%u\n",
+        aux.timestamp.tv_sec,
+        aux.timestamp.tv_nsec,
+        aux.type,
+        aux.quantity);
+        e = malloc(sizeof(struct entry));
+        e->timestamp.tv_sec = aux.timestamp.tv_sec;
+        e->timestamp.tv_nsec =aux.timestamp.tv_nsec;
+        e->type = aux.type;
+        e->quantity= aux.quantity;
+        e->next = NULL;
+        add_entry_in_register(er,e);
+    }
+    registers_list_add(er);
+    fclose(er->f);
+    return er;
+}
+
 /**
  * @brief  prove
  * @note   prova note
@@ -476,9 +598,60 @@ struct sockaddr ds_addr;
 }*/
 
 
+
+
 /*
 ### GLOBALS INIT E FREE #####################
 */
+
+void generate_work_folders(){
+    char path[50];
+    int result;
+    sprintf(path,"./%d",my_port);
+    printf("%s\n",path);
+    result = mkdir(path, 0777);
+    my_path = malloc(sizeof(char)*(strlen(path)+1));
+    strcpy(my_path,path);
+    if(result == -1){
+        printf("Cartella %s già presente\n",my_path);
+    }else{
+        printf("Cartella %s creata\n",my_path);
+    }
+    sprintf(path+strlen(path),"/log");
+    result = mkdir(path, 0777);
+    my_log_path = malloc(sizeof(char)*(strlen(path)+1));
+    strcpy(my_log_path,path);
+    if(result == -1){
+        printf("Cartella %s già presente\n",my_log_path);
+    }else{
+        printf("Cartella %s creata\n",my_log_path);
+    }
+}
+
+void registers_list_init(){
+    DIR *d;
+    struct dirent *dir;
+    char *path_n_file_name;
+    d = opendir(my_path);
+    if (d) {
+        while ((dir = readdir(d)) != NULL) {
+            if(strcmp((dir->d_name+strlen(dir->d_name)-3),"txt")==0){
+                printf("%s estensione %s\n", dir->d_name,(dir->d_name+strlen(dir->d_name)-3));
+                path_n_file_name = malloc(sizeof(char)*(strlen(my_path)+strlen(dir->d_name)+2));//+2 perché considero anche '/' e "\n"
+                strcpy(path_n_file_name,my_path);
+                strcat(path_n_file_name,"/");
+                strcat(path_n_file_name,dir->d_name);
+                load_register(path_n_file_name);
+                free(path_n_file_name);
+            }
+    }
+    closedir(d);
+  }
+  open_today_register();
+
+}
+
+
 void ds_option_set(char c);
 /**
  * @brief  Inizializza tutte le variabili globali condivise dai thread
@@ -487,7 +660,6 @@ void ds_option_set(char c);
  */
 void globals_init(){
     my_id =-1;
-    my_port = -1;
     ds_option_set('x');
     inet_pton(AF_INET,LOCAL_HOST,&my_addr);
     max_socket = 0;
@@ -498,6 +670,8 @@ void globals_init(){
     FD_ZERO(&master);
     FD_ZERO(&to_read);
     neighbors_list = NULL;
+    generate_work_folders();
+    registers_list_init();
     pthread_mutex_init(&neighbors_list_mutex,NULL);
     pthread_mutex_init(&fd_mutex,NULL);
     pthread_mutex_init(&ds_mutex,NULL);
@@ -998,7 +1172,7 @@ void * tcp_comunication_loop(void *arg){
         exit(-1);
     }
     ret = listen(s_socket,DEFAULT_SOCKET_SLOTS);
-    printf("Server aperto alla porta: %d\n",s_port);
+    printf("Socket tcp aperta alla porta: %d\n",s_port);
     
     FD_SET(s_socket,&master);
     printf("Server socket = %d\n",s_socket);
@@ -1062,14 +1236,7 @@ printf("%c,%u",prova>>32,prova & mask);
     return 1;
 */
 
-void generate_work_folder(){
-    char path[10];
-    int result;
-    sprintf(path,"./%d",my_port);
-    printf("%s\n",path);
-    result = mkdir(path, 0777);
-    printf("result = %d\n",result);
-}
+
 
 int main(int argc, char* argv[]){
     if(argc>1){
@@ -1077,8 +1244,8 @@ int main(int argc, char* argv[]){
     }else{
         my_port = DEFAULT_PORT;
     }
-    generate_work_folder();
     globals_init();
+    registers_list_print();
     if(pthread_create(&tcp_comunication_thread,NULL,tcp_comunication_loop,(void*)&my_port)){
         perror("Errore nella creazione del thread\n");
         exit(EXIT_FAILURE);
