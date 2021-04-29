@@ -1,6 +1,5 @@
 #include "../consts/const.h"
 #include "../libs/my_sockets.h"
-#include "../libs/my_parser.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
@@ -9,6 +8,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
 
 /*
 DISCOVERY SERVER:
@@ -178,7 +178,27 @@ void timer_list_add(int id){
     pthread_mutex_unlock(&timer_mutex);
 }
 
-
+pthread_mutex_t sinc_time_mutex;
+time_t sinc_time;
+void sinc_time_add_day(){
+    pthread_mutex_lock(&sinc_time_mutex);
+    //Aggiungo un giorno
+    sinc_time+= 86400;
+    pthread_mutex_unlock(&sinc_time_mutex);
+}
+void sinc_time_set(time_t t){
+    pthread_mutex_lock(&sinc_time_mutex);
+    //Aggiungo un giorno
+    sinc_time=t;
+    pthread_mutex_unlock(&sinc_time_mutex);
+}
+time_t sinc_time_get(){
+    time_t ret;
+    pthread_mutex_lock(&sinc_time_mutex);
+    ret = sinc_time;
+    pthread_mutex_unlock(&sinc_time_mutex);
+    return ret;
+}
 /*
 Elemento che definisce un peer in una lista ordinata
 */
@@ -284,6 +304,7 @@ void globals_init(){
 // Gli elementi vuoti della peers_table sono identificati con porta = -1
         peers_table[i].port = -1;
     }
+    sinc_time = 0;
     pthread_mutex_init(&list_mutex,NULL);
     pthread_mutex_init(&table_mutex,NULL);
     pthread_mutex_init(&timer_mutex,NULL);
@@ -775,6 +796,8 @@ void* thread_ds_loop(void* arg){
     //peer info
     struct in_addr peer_in_addr;
     int peer_port=-1;
+    time_t time_recived;
+    time_t cur_sinc_time;
     int id;
     if(open_udp_socket(&ds_socket,&ds_addr,port)){
         perror("[DS_Thread]: Impossibile aprire socket");
@@ -785,6 +808,7 @@ void* thread_ds_loop(void* arg){
     peer_addrlen = sizeof(peer_addr);
     //thread_test();
     while(loop_flag){
+        
         if(recvfrom(ds_socket,buffer,DS_BUFFER,0,(struct sockaddr*)&peer_addr,&peer_addrlen)<0){
             perror("[DS_Thread]: Errore nella ricezione");
             continue;
@@ -793,20 +817,30 @@ void* thread_ds_loop(void* arg){
             printf("[DS_Thread]: Ricosciuto comando di uscita\n");
             continue;
         }
-        sscanf(buffer,"%u,%d,%c",&peer_addr.sin_addr.s_addr,&peer_port,&option);
+        sscanf(buffer,"%u,%d,%ld,%c",&peer_in_addr.s_addr,&peer_port,&time_recived,&option);
         id = get_id_by_ip_port(peer_in_addr,peer_port);
         if(id==-1){//nuovo utente
             id = add_peer(peer_in_addr,peer_port);
         }else{//Refresha il time_to_live del peer
             timer_list_add(id);
         }
-        if(option == 'b'){// Bye Bye message, rimuovo il peer
-            remove_peer(id);
-        }
-        if(option == 'x'){// Se x richiede anche la lista dei vicini
+        if(option =='r'){//Segnale di sincronizzazione
+            cur_sinc_time = sinc_time_get();
+            if(cur_sinc_time>time_recived){//Informo che necessita sincronizzarsi
+                sprintf(buffer,"%ld",cur_sinc_time);
+                sendto(ds_socket,buffer,(strlen(buffer)+1),0,(struct sockaddr*)&peer_addr,peer_addrlen);
+            }else if(cur_sinc_time<time_recived){
+                sinc_time_set(time_recived);
+                printf("Aggiorno la data sinc_time! %ld\n",sinc_time);
+            }
+        }else if(option == 'x'){// Se x richiede anche la lista dei vicini
             msg_len = generate_neighbors_list_message(id,&msg);
             sendto(ds_socket,msg,msg_len,0,(struct sockaddr*)&peer_addr,peer_addrlen);
-        } 
+        }else if(option == 'b'){// Bye Bye message, rimuovo il peer
+            remove_peer(id);
+        }
+        
+         
     }
     close(ds_socket);
     pthread_exit(NULL);
@@ -915,6 +949,11 @@ void user_loop(int port){
             //__showpeersinfo__
             case 4:
                 timer_list_print();
+                //peers_table_print_all_peers();
+            break;
+            case 5:
+                sinc_time_add_day();
+                printf("Segnalato\n");
                 //peers_table_print_all_peers();
             break;
             //__comando non riconosciuto__

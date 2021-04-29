@@ -25,6 +25,8 @@ int max_socket;
 int s_socket;
 char* my_path;
 char* my_log_path;
+
+time_t current_open_date;
 fd_set master;
 fd_set to_read;
 pthread_mutex_t fd_mutex;
@@ -184,18 +186,41 @@ void save_register(){
 }*/
 
 /**
- * @brief  Cerca la prima lista aperta della registers_list e inserisce lì il record passato
+ * @brief  Cerca la prima lista aperta della registers_list e 
+ *         ci inserisce il record passato, aggiorna anche il relativo file.
  * @note   vedi add_entry_in_register , get_open_register
  * @param  *e:entry il record da inserire
- * @retval None
+ * @retval int 0 errore 1 ok
  */
 int add_entry(struct entry *e){
+    int ret;
     struct entries_register *er = get_open_register();
     if(er==NULL)return 0;
-    return add_entry_in_register(er,e);
+    ret =  add_entry_in_register(er,e);
+    if(ret){
+        fprintf(er->f,"%ld.%ld:%c,%u\n",e->timestamp.tv_sec,
+        e->timestamp.tv_nsec,
+        e->type,
+        e->quantity);
+    }
+    return ret;
 }
-
-
+/**
+ * @brief  Crea una entry e la inserisce nella entries_register aperta
+ * @note   add_entry(struct entry *e)
+ * @param  type:char tipo di entry ( t:tampone n:nuovo caso ) 
+ * @param  quantity:unsigned_int la quantità di type
+ * @retval 
+ */
+int create_entry(char type, unsigned int quantity){
+    struct entry *e =  malloc(sizeof(struct entry));
+    e->next = NULL;
+    e->quantity = quantity;
+    e->type = type;
+    timespec_get(&e->timestamp,TIME_UTC);
+    e->timestamp.tv_sec+= 7200; //Noi siamo avanti 2 ore rispetto UTC
+    return add_entry(e);
+}
 
 int registers_list_add(struct entries_register *er){
     struct entries_register *cur;
@@ -251,6 +276,7 @@ void registers_list_print(){
         }
         cur = cur->next;
     }
+    printf("fine stampa\n");
 }
 
 /**
@@ -440,8 +466,13 @@ char* get_file_name(char*path){
     strncpy(file_name,path+s_start,s_end-s_start);
     return file_name;
 }
-
-void open_today_register(){
+/**
+ * @brief  Apre il registro della data corrente, se è già stato chiuso
+ *         apre quello del giorno successivo e così via.
+ * @note   
+ * @retval None
+ */
+struct entries_register* open_today_register(){
     struct entries_register *er;
     int ret;
     char filename[20];
@@ -464,18 +495,74 @@ void open_today_register(){
     do{
         er->creation_date = today;
         ret = registers_list_add(er);
-        today+=86400;
+        today+=86400; //passo al giorno successivo
     //La data di oggi potrebbe essere già stata chiusa
     }while(!ret);
     //Completiamo l'inizializzazione
-    sprintf(filename,"%ld",er->creation_date);
-    er->path = malloc(sizeof(char)*(strlen(my_path)+strlen(filename)+2));//+7 perché considero anche '/' e "\0" e .txt
+    sprintf(filename,"%d-%ld",er->is_open,er->creation_date);
+    er->path = malloc(sizeof(char)*(strlen(my_path)+strlen(filename)+7));//+7 perché considero anche '/' e "\0" e .txt
     strcpy(er->path,my_path);
     strcat(er->path,"/");
     strcat(er->path,filename);
     strcat(er->path,".txt");
     er->f = fopen(er->path,"a");
+    return er;
 }
+
+
+
+/**
+ * @brief  Chiude il registro di oggi e il relativo file cambiandogli nome
+ * @note   
+ * @retval None
+ */
+void just_close_today_register(){
+    struct entries_register *er;
+    char *old_path;
+    int position;
+    
+    er = get_open_register();
+    position = strlen(er->path);
+    old_path = malloc(sizeof(char)*(strlen(er->path)+1));
+    strcpy(old_path,er->path);
+    er->is_open = 0;
+    fclose(er->f);
+    //Cambio nome al file per contrassegnarlo come chiuso
+    while(er->path[position]!='-') position--;
+    er->path[position-1] = '0';
+    rename(old_path,er->path);
+}
+
+/**
+ * @brief  Chiude il registro aperto e apre quello del giorno successivo.
+ * @note   
+ * @retval None
+ */
+void close_today_register(){
+    struct entries_register *er;
+close_loop:
+    just_close_today_register();
+    er = open_today_register();
+    //Mi sincronizzo con gli altri peer
+    if(current_open_date > er->creation_date) goto close_loop;
+}
+
+/**
+ * @brief  Setta la data di sincronizzazione
+ * @note   Utilizzata dal thread che comunica con il DS
+ * @param  new_open_date:time_t la nuova data ricevuta 
+ * @retval None
+ */
+void set_current_open_date(time_t new_open_date){
+    current_open_date = new_open_date;
+}
+
+time_t get_current_open_date(){
+    time_t ret;
+    ret =  current_open_date;
+    return ret;
+}
+
 /**
  * @brief  Carica il registro dal file
  * @note   formato <secondi>.<nano>:<tipo>,<quantità>
@@ -490,12 +577,12 @@ struct entries_register* load_register(char* path){
     er = malloc(sizeof(struct entries_register));
     char* file_name = get_file_name(path);
     printf("il path è %s\n il nome del file è %s\n",path,file_name);
-    er->creation_date = atol(file_name);
+    sscanf(file_name,"%d-%ld",&er->is_open,&er->creation_date);
     er->path = malloc(sizeof(char)*(strlen(path)+1));
     strcpy(er->path,path);
     er->entries = NULL;
     er->next = NULL;
-    er->is_open = 0;
+    
     //if(path==NULL) return;
     er->f = fopen(path,"r");
     while(fscanf(
@@ -520,6 +607,8 @@ struct entries_register* load_register(char* path){
     }
     registers_list_add(er);
     fclose(er->f);
+    if(er->is_open){ er->f = fopen(path,"a");}
+    printf("fine load\n");
     return er;
 }
 
@@ -631,6 +720,7 @@ void generate_work_folders(){
 void registers_list_init(){
     DIR *d;
     struct dirent *dir;
+    struct entries_register *er;
     char *path_n_file_name;
     d = opendir(my_path);
     if (d) {
@@ -647,8 +737,9 @@ void registers_list_init(){
     }
     closedir(d);
   }
-  open_today_register();
-
+  er = get_open_register();
+  if(er==NULL){er = open_today_register();}
+  current_open_date = er->creation_date;
 }
 
 
@@ -737,16 +828,19 @@ void send_byebye_to_all();
  */
 void user_loop(){
     void* ret;
+    char confirm;
     char msg[40];
     int port;
     int args_number;
     int command_index;
-    char args[2][PEER_MAX_COMMAND_SIZE];
+    char args[3][PEER_MAX_COMMAND_SIZE];
+    char type;
+    unsigned int quantity;
     printf(PEER_WELCOME_MSG);
     while(loop_flag){
         printf(">> ");
         fgets(msg, 40, stdin);
-        args_number = sscanf(msg,"%s %s",args[0],args[1]);
+        args_number = sscanf(msg,"%s %s %s",args[0],args[1],args[2]);
         //arg_len = my_parser(&args,msg);
         if(args_number>0){
             command_index = find_command(args[0]);
@@ -773,7 +867,35 @@ void user_loop(){
                 break;
             //__add__
             case 2:
-                printf("to do\n");
+                type = *args[1];
+                if( type!='n' && type!='t'){
+                    printf("Tipo non valido, accettato solo n e t\n");
+                    break;
+                }
+                for(int i =0;i<strlen(args[2]);i++){
+                    if(args[2][i]=='-') args[2][i]=' ';
+                }
+                quantity = strtoul(args[2],NULL,0);
+                if(quantity==0){
+                    printf("Inserire una quantità maggiore o uguale di 0!\n");
+                }
+                if(type =='t'){
+                    printf("Aggiungere %u nuovi tamponi?<y/n>\n>> ",quantity);
+                }else{
+                    printf("Aggiungere %u nuovi positivi?<y/n>\n>> ",quantity);
+                }
+                
+                scanf("%c",&confirm);
+                //Rimuovo lo /n lasciata dalla scanf
+                while((getchar()) != '\n'); 
+                if(confirm!='y'){
+                    printf("Entry annullata\n");
+                    break;
+                }
+                if(create_entry(type,quantity)==0){
+                    printf("Impossibile inserire una nuova entry!\n");
+                    break;
+                }
             break;
             //__get__
             case 3:
@@ -978,13 +1100,7 @@ void update_neighbors(char* msg){
     }
 }
 
-/*
-DS formato messaggio
-<id>,<numero vicini>
-<id_vicino>,<indirizzo>,<s_porta>
-... (ripetuto per <numero vicini0>)
-<id_vicino>,<indirizzo>,<s_porta>
-*/
+
 //Indica il tipo di servezion richiesto al DS
 char ds_option;
 
@@ -1011,11 +1127,25 @@ void ds_option_set(char c){
     ds_option = c;
     pthread_mutex_unlock(&ds_mutex);
 }
-
-void* ds_comunication_loop(void*arg){
+/**
+ * @brief  Gestisce la comunicazione con il DS ottentendo i vicini
+ *         e sincronizzando la data del registro aperto. 
+ * @note   
+ *           formato messaggio ricevuto richiesta vicini
+ *           <id>,<numero vicini>
+ *           <id_vicino>,<indirizzo>,<s_porta>
+ *           ... (ripetuto per <numero vicini>)
+ *           <id_vicino>,<indirizzo>,<s_porta>
+ *           
+ *          
+ * @param  *arg:void contiene la porta del DS
+ * @retval None
+ */
+void* ds_comunication_loop(void *arg){
     fd_set ds_master;
     fd_set ds_to_read;
     int ret;
+    time_t time_recived;
     struct timeval timeout;
     char buffer[DS_BUFFER];
     int socket,s_port,ds_port;
@@ -1026,9 +1156,8 @@ void* ds_comunication_loop(void*arg){
     s_port = MIN_PORT;
     //Apro una socket udp per riceve i messaggi da DS
     while(s_port<MAX_PORT){
-        //Continuo a ciclare finché non trovo una s_porta libera oppure
-        //Finisco le s_porte
-        printf("Prova apertura socket udp a porta: %d\n",s_port);
+        //Continuo a ciclare finché non trovo una porta libera oppure
+        //Finisco le porte
         ret = open_udp_socket(&socket,&addr,s_port);
         if(ret < 0){
             if(s_port<MAX_PORT){
@@ -1039,7 +1168,7 @@ void* ds_comunication_loop(void*arg){
                 pthread_exit(NULL);
             }
         }
-        printf("Socket udp aperta\n");
+        printf("Socket udp aperta alla porta %d\n",s_port);
         break;
     }
     FD_ZERO(&ds_master);
@@ -1053,43 +1182,34 @@ void* ds_comunication_loop(void*arg){
     ds_addr.sin_port = htons(ds_port);//Porta
     inet_pton(AF_INET,LOCAL_HOST,&ds_addr.sin_addr);
     ds_addrlen = sizeof(ds_addr);
-    //option = (neighbors_number<2)?'x':'r';
-    /*while(loop_flag){
-        option = ds_option_get();
-        sprintf(buffer,"%u,%d,%c",addr.sin_addr.s_addr,my_port,option);
-        sendto(socket,&buffer,strlen(buffer)+1,0,(struct sockaddr*)&ds_addr,ds_addrlen);
-        if(option!='r'){//refresh
-            if(recvfrom(socket,buffer,DS_BUFFER,0,(struct sockaddr*)&ds_addr,&ds_addrlen)<0){
-                printf("Errore nella ricezione");
-                continue;
-            }
-            printf("messaggio ricevuto:\n %s",buffer);
-            update_neighbors(buffer);
-        }
-        if(option == 'b'){//byebye
-            break;
-        }
-
-        
-        sleep(DS_COMUNICATION_LOOP_SLEEP_TIME);
-    }*/
+    
     while(loop_flag){
         option = ds_option_get();
-        sprintf(buffer,"%u,%d,%c",addr.sin_addr.s_addr,my_port,option);
+        //Richiesta vicini
+        sprintf(buffer,"%u,%d,%ld,%c",my_addr.s_addr,my_port,current_open_date,option);
+  
         sendto(socket,&buffer,strlen(buffer)+1,0,(struct sockaddr*)&ds_addr,ds_addrlen);
         ds_to_read = ds_master;
         timeout.tv_sec = DS_COMUNICATION_LOOP_SLEEP_TIME;
         ret = select(socket+1,&ds_to_read,NULL,NULL,&timeout); //Abbiamo solo una socket nella lista
         //perror("Select:");
         if(ret==1){
-            if(option=='x'){//Richiesta della lista dei vicini
             if(recvfrom(socket,buffer,DS_BUFFER,0,(struct sockaddr*)&ds_addr,&ds_addrlen)<0){
                 printf("Errore nella ricezione");
                 continue;
             }
+            if(option=='x'){//Richiesta della lista dei vicini
                 printf("messaggio ricevuto:\n %s",buffer);
                 update_neighbors(buffer);
-                ds_option_set('r');//Il loop passa in modalità refresh
+                ds_option_set('r');//Il loop passa in modalità sincronizzazione ( refresh )
+            }else if(option == 'r'){
+                printf("Ricevuto %s\n",buffer);
+                sscanf(buffer,"%ld",&time_recived);
+                printf("Il mio tempo:%ld , ricevuto:%ld ",get_current_open_date(),time_recived);
+                if(time_recived > get_current_open_date()){//dobbiamo sincronizzarci
+                    set_current_open_date(time_recived);
+                    close_today_register();
+                }
             }
         }
         if(option == 'b'){//byebye
@@ -1251,7 +1371,9 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
     sleep(1);
+    printf("inizio user loop\n");
     user_loop();
+    just_close_today_register();
     globals_free();
     printf("Ciao, ciao!\n");
 }

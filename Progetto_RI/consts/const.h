@@ -9,11 +9,11 @@
 #define DEFAULT_TABLE_SIZE 2
 #define DEFAULT_NEIGHBOUR_VECTOR_SIZE 2
 #define SERVER_MAX_COMMAND_SIZE 14
-#define SERVER_COMMANDS_NUMBER 5
+#define SERVER_COMMANDS_NUMBER 6
 #define DS_BUFFER 255
 #define SERVER_WELCOME_MSG "Discovery Server pronto, benvenuto!\nScrivi comando, ( help per mostrare lista comandi )\n"
-#define SERVER_COMMAND_LIST {"help","showpeers","showneighbor","esc","showpeersinfo"}
-#define SERVER_HELP_MSG "showpeers : mostra la lista dei peers ordinata per porta\nshowneighbor <ID> : mostra i vicini del peer richiesto\nshowpeersinfo : mostra nel dettaglio le informazioni di tutti i peers\nesc: chiudi il server\n"
+#define SERVER_COMMAND_LIST {"help","showpeers","showneighbor","esc","showpeersinfo","closeday"}
+#define SERVER_HELP_MSG "showpeers : mostra la lista dei peers ordinata per porta\nshowneighbor <ID> : mostra i vicini del peer richiesto\nshowpeersinfo : mostra nel dettaglio le informazioni di tutti i peers\ncloseday: segnala ai peer di chiudere il registro di oggi\nesc: chiudi il server\n"
 #define DEFAULT_TIME_TO_LIVE 5
 // Peer consts
 #define DEFAULT_DS_PORT 4242
