@@ -31,6 +31,7 @@ fd_set master;
 fd_set to_read;
 pthread_mutex_t fd_mutex;
 pthread_mutex_t ds_mutex;
+pthread_mutex_t register_mutex;
 pthread_t ds_comunication_thread;
 pthread_t tcp_comunication_thread;
 struct neighbour{
@@ -78,7 +79,7 @@ struct entry {
     //Identifica la entry
     struct timespec timestamp;
     char type;
-    unsigned int quantity;
+    long quantity;
     struct entry *next;
 };
 
@@ -194,22 +195,27 @@ void save_register(){
  */
 int add_entry(struct entry *e){
     int ret;
+    pthread_mutex_lock(&register_mutex);
     struct entries_register *er = get_open_register();
-    if(er==NULL)return 0;
+    if(er==NULL){
+        pthread_mutex_unlock(&register_mutex);
+        return 0;
+    }
     ret =  add_entry_in_register(er,e);
     if(ret){
-        fprintf(er->f,"%ld.%ld:%c,%u\n",e->timestamp.tv_sec,
+        fprintf(er->f,"%ld.%ld:%c,%ld\n",e->timestamp.tv_sec,
         e->timestamp.tv_nsec,
         e->type,
         e->quantity);
     }
+    pthread_mutex_unlock(&register_mutex);
     return ret;
 }
 /**
  * @brief  Crea una entry e la inserisce nella entries_register aperta
  * @note   add_entry(struct entry *e)
  * @param  type:char tipo di entry ( t:tampone n:nuovo caso ) 
- * @param  quantity:unsigned_int la quantità di type
+ * @param  quantity:long la quantità di type
  * @retval 
  */
 int create_entry(char type, unsigned int quantity){
@@ -516,7 +522,7 @@ struct entries_register* open_today_register(){
  * @note   
  * @retval None
  */
-void just_close_today_register(){
+void close_today_register_file(){
     struct entries_register *er;
     char *old_path;
     int position;
@@ -540,11 +546,13 @@ void just_close_today_register(){
  */
 void close_today_register(){
     struct entries_register *er;
+    pthread_mutex_lock(&register_mutex);
 close_loop:
-    just_close_today_register();
+    close_today_register_file();
     er = open_today_register();
     //Mi sincronizzo con gli altri peer
     if(current_open_date > er->creation_date) goto close_loop;
+    pthread_mutex_unlock(&register_mutex);
 }
 
 /**
@@ -554,12 +562,16 @@ close_loop:
  * @retval None
  */
 void set_current_open_date(time_t new_open_date){
+    pthread_mutex_lock(&register_mutex);
     current_open_date = new_open_date;
+    pthread_mutex_unlock(&register_mutex);
 }
 
 time_t get_current_open_date(){
     time_t ret;
+    pthread_mutex_lock(&register_mutex);
     ret =  current_open_date;
+    pthread_mutex_unlock(&register_mutex);
     return ret;
 }
 
@@ -587,12 +599,12 @@ struct entries_register* load_register(char* path){
     er->f = fopen(path,"r");
     while(fscanf(
         er->f,
-        "%ld.%ld:%c,%u",
+        "%ld.%ld:%c,%ld",
         &aux.timestamp.tv_sec,
         &aux.timestamp.tv_nsec,
         &aux.type,
         &aux.quantity)!=EOF){
-        printf("Dentro %ld.%ld:%c,%u\n",
+        printf("Dentro %ld.%ld:%c,%ld\n",
         aux.timestamp.tv_sec,
         aux.timestamp.tv_nsec,
         aux.type,
@@ -610,6 +622,44 @@ struct entries_register* load_register(char* path){
     if(er->is_open){ er->f = fopen(path,"a");}
     printf("fine load\n");
     return er;
+}
+
+int update_register_by_remote_string(char* buffer){
+    struct entries_register *er;
+    struct entry *e;
+    int size;
+    int index=0;
+    int tot_size = strlen(buffer);
+    pthread_mutex_lock(&register_mutex);
+    er = get_open_register();
+    if(er==NULL){
+        //Nessun registro aperto
+        pthread_mutex_unlock(&register_mutex);
+        return 0;
+    }
+    do{
+        size = 0;
+        do{//Considero anche lo /n
+            size++;
+        }while(buffer[index+size]!='\n');
+        e = malloc(sizeof(struct entry));
+        sscanf(
+        buffer+index,
+        "%ld.%ld:%c,%ld",
+        &e->timestamp.tv_sec,
+        &e->timestamp.tv_nsec,
+        &e->type,
+        &e->quantity);
+        printf("Dentro %ld.%ld:%c,%ld\n",
+        e->timestamp.tv_sec,
+        e->timestamp.tv_nsec,
+        e->type,
+        e->quantity);
+        add_entry_in_register(er,e);
+        index = size+1;
+    }while(tot_size>index);
+    pthread_mutex_unlock(&register_mutex); 
+    return 1;
 }
 
 /**
@@ -764,6 +814,7 @@ void globals_init(){
     generate_work_folders();
     registers_list_init();
     pthread_mutex_init(&neighbors_list_mutex,NULL);
+    pthread_mutex_init(&register_mutex,NULL);
     pthread_mutex_init(&fd_mutex,NULL);
     pthread_mutex_init(&ds_mutex,NULL);
 }
@@ -835,7 +886,7 @@ void user_loop(){
     int command_index;
     char args[3][PEER_MAX_COMMAND_SIZE];
     char type;
-    unsigned int quantity;
+    long quantity;
     printf(PEER_WELCOME_MSG);
     while(loop_flag){
         printf(">> ");
@@ -875,14 +926,14 @@ void user_loop(){
                 for(int i =0;i<strlen(args[2]);i++){
                     if(args[2][i]=='-') args[2][i]=' ';
                 }
-                quantity = strtoul(args[2],NULL,0);
+                quantity = strtol(args[2],NULL,0);
                 if(quantity==0){
                     printf("Inserire una quantità maggiore o uguale di 0!\n");
                 }
                 if(type =='t'){
-                    printf("Aggiungere %u nuovi tamponi?<y/n>\n>> ",quantity);
+                    printf("Aggiungere %ld nuovi tamponi?<y/n>\n>> ",quantity);
                 }else{
-                    printf("Aggiungere %u nuovi positivi?<y/n>\n>> ",quantity);
+                    printf("Aggiungere %ld nuovi positivi?<y/n>\n>> ",quantity);
                 }
                 
                 scanf("%c",&confirm);
@@ -1013,6 +1064,39 @@ int send_greeting_message(struct neighbour* n){
     printf("Saluto inviato!\n");
     return 1;
 }
+/**
+ * @brief  Genera una stringa contentente tutti i dati di un registro
+ * @note   Formato messaggio
+ *         Nome registro
+ *         entries
+ * 
+ * @param  *er:entries_register puntatore al registro
+ * @param  **msg:char Puntatore alla stringa 
+ * @retval 
+ */
+int generate_entries_list_msg(struct entries_register *er,char **msg){
+    int size;
+    char name[64];
+    pthread_mutex_lock(&register_mutex);
+    sprintf(name,"%ld\n",er->creation_date);
+    printf("Nome registro\n%s",name);
+    if(er == NULL) return 0;
+    fclose(er->f);
+    fopen(er->path,"r");
+    fseek(er->f, 0L, SEEK_END);
+    size = ftell(er->f);
+    fseek(er->f, 0L, SEEK_SET);
+    *msg = malloc(sizeof(char)*(size+strlen(name)));
+    strcpy(*msg,name);
+    printf("La dimensione della stringa %ld ma size = %d\n",strlen(*msg),size);
+    fread((void*)(*msg+strlen(name)),sizeof(char),size,er->f);
+    msg[size]='\0';
+    printf("Stringa finale\n%s",*msg);
+    fclose(er->f);
+    er->f = fopen(er->path,"a");
+    pthread_mutex_unlock(&register_mutex);
+    return (size+strlen(name));
+}
 
 /**
  * @brief  Inivia un messaggio al peer indicando che sta per abbandonare la rete
@@ -1027,7 +1111,7 @@ int send_byebye_message(struct neighbour* n){
     char operation = 'B';//Bye Bye!
     if(n == NULL) return 0; //Non dovrebbe MAI accadere
     /*GENERO IL MESSAGGIO E LO MANDO DOPO AVER MANDATO IL PRIMO PACCHETTO*/
-    len = 0; //Non mandiamo nessun secondo messaggio
+    len = 0;// generate_entries_list_msg(get_open_register(),&entry_list_msg); //Non mandiamo nessun secondo messaggio
     len = htonl(len);
     operations = (unsigned int)operation;
     operations = htonl(operations);
@@ -1044,6 +1128,24 @@ int send_byebye_message(struct neighbour* n){
     return 1;
 }
 
+/*
+⢀⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀⣠⣤⣶⣶
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⢰⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⣀⣀⣾⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⡏⠉⠛⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⣿
+⣿⣿⣿⣿⣿⣿⠀⠀⠀⠈⠛⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠛⠉⠁⠀⣿
+⣿⣿⣿⣿⣿⣿⣧⡀⠀⠀⠀⠀⠙⠿⠿⠿⠻⠿⠿⠟⠿⠛⠉⠀⠀⠀⠀⠀⣸⣿
+⣿⣿⣿⣿⣿⣿⣿⣷⣄⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠠⣴⣿⣿⣿⣿ I LIMONI SIGNORAAAAA
+⣿⣿⣿⣿⣿⣿⣿⣿⡟⠀⠀⢰⣹⡆⠀⠀⠀⠀⠀⠀⣭⣷⠀⠀⠀⠸⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⠃⠀⠀⠈⠉⠀⠀⠤⠄⠀⠀⠀⠉⠁⠀⠀⠀⠀⢿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⢾⣿⣷⠀⠀⠀⠀⡠⠤⢄⠀⠀⠀⠠⣿⣿⣷⠀⢸⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⡀⠉⠀⠀⠀⠀⠀⢄⠀⢀⠀⠀⠀⠀⠉⠉⠁⠀⠀⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢹⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿
+*/
+
+int send_copy_message(struct neighbour* n){return 0;}
 
 /**
  * @brief  Lancia send_byebye_message(...) a tutti i membri della neighbors_list
@@ -1373,7 +1475,6 @@ int main(int argc, char* argv[]){
     sleep(1);
     printf("inizio user loop\n");
     user_loop();
-    just_close_today_register();
     globals_free();
     printf("Ciao, ciao!\n");
 }
