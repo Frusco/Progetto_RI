@@ -111,9 +111,9 @@ int entriescmp(struct entry* x,struct entry* y){
     return 0; //sono uguali
 }
 
-struct entry* entry_init(char type, unsigned int quantity){
+struct entry* entry_init(char type,long quantity){
     struct entry* e;
-    if(type!='N' && type!='T') return NULL; //type non valido
+    if(type!='n' && type!='t') return NULL; //type non valido
     if(quantity == 0) return NULL; //Entry vuota!
     e = malloc(sizeof(struct entry));
     if( e == NULL) return NULL;
@@ -203,10 +203,12 @@ int add_entry(struct entry *e){
     }
     ret =  add_entry_in_register(er,e);
     if(ret){
+        er->f = fopen(er->path,"a");
         fprintf(er->f,"%ld.%ld:%c,%ld\n",e->timestamp.tv_sec,
         e->timestamp.tv_nsec,
         e->type,
         e->quantity);
+        fclose(er->f);
     }
     pthread_mutex_unlock(&register_mutex);
     return ret;
@@ -277,7 +279,7 @@ void registers_list_print(){
         e_cur = cur->entries;
         printf("register: %s",ctime(&cur->creation_date));
         while(e_cur){
-            printf("entry: %s",ctime(&e_cur->timestamp.tv_sec));
+            printf("entry: %s|->type:%c quantity: %ld\n",ctime(&e_cur->timestamp.tv_sec),e_cur->type,e_cur->quantity);  
             e_cur = e_cur->next;
         }
         cur = cur->next;
@@ -511,7 +513,6 @@ struct entries_register* open_today_register(){
     strcat(er->path,"/");
     strcat(er->path,filename);
     strcat(er->path,".txt");
-    er->f = fopen(er->path,"a");
     return er;
 }
 
@@ -619,7 +620,6 @@ struct entries_register* load_register(char* path){
     }
     registers_list_add(er);
     fclose(er->f);
-    if(er->is_open){ er->f = fopen(path,"a");}
     printf("fine load\n");
     return er;
 }
@@ -870,6 +870,7 @@ void send_exit_packet(int ds_port){
     close(socket);
 }
 */
+void send_backups_to_all();
 void* ds_comunication_loop(void*arg);
 void send_byebye_to_all();
 /**
@@ -958,11 +959,13 @@ void user_loop(){
                 printf("Chiusura in corso...\n");
                 ds_option_set('b');
                 pthread_join(ds_comunication_thread,&ret);
+                send_backups_to_all();
+                sleep(1);
                 send_byebye_to_all();
                 loop_flag = 0;
                 pthread_join(tcp_comunication_thread,&ret);
                 printf("Socket chiusa\n");
-                sleep(1);
+                
             break;
             //__comando non riconosciuto__
             default:
@@ -1077,25 +1080,29 @@ int send_greeting_message(struct neighbour* n){
 int generate_entries_list_msg(struct entries_register *er,char **msg){
     int size;
     char name[64];
-    pthread_mutex_lock(&register_mutex);
     sprintf(name,"%ld\n",er->creation_date);
-    printf("Nome registro\n%s",name);
     if(er == NULL) return 0;
-    fclose(er->f);
-    fopen(er->path,"r");
+    er->f=fopen(er->path,"r");
+    fseek(er->f, 0L, SEEK_SET);
     fseek(er->f, 0L, SEEK_END);
     size = ftell(er->f);
     fseek(er->f, 0L, SEEK_SET);
     *msg = malloc(sizeof(char)*(size+strlen(name)));
+    
+    //memset(*msg,'\0',size+strlen(name));
+    
     strcpy(*msg,name);
-    printf("La dimensione della stringa %ld ma size = %d\n",strlen(*msg),size);
+    if(size == 0){
+        printf("Niente da copiare\n");
+        free(*msg);
+        msg = NULL;
+        return size;
+    }
     fread((void*)(*msg+strlen(name)),sizeof(char),size,er->f);
-    msg[size]='\0';
-    printf("Stringa finale\n%s",*msg);
+    (*msg)[size+strlen(name)]='\0';
+    printf("\nStampo come stringa\n%s\n",*msg);
     fclose(er->f);
-    er->f = fopen(er->path,"a");
-    pthread_mutex_unlock(&register_mutex);
-    return (size+strlen(name));
+    return strlen(*msg);
 }
 
 /**
@@ -1144,8 +1151,64 @@ int send_byebye_message(struct neighbour* n){
 ⣿⣿⣿⣿⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢹⣿⣿
 ⣿⣿⣿⣿⣿⣿⣿⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿
 */
-
-int send_copy_message(struct neighbour* n){return 0;}
+/**
+ * @brief  Invia una copia di ogni record registrato dal peer al vicino n divisi per registro
+ * @note   
+ * @param  n:neighbour* puntatore al vicino 
+ * @retval int 1 ok, 0 errore in fase di invio.
+ */
+int send_backups_messages(struct neighbour* n){
+    uint64_t first_packet=0; // contiene la lunghezza del prossimo messaggio e del codice
+    uint32_t len; // lunghezza messaggio
+    uint32_t operations=0;
+    struct entries_register *er;
+    char *msg;
+    pthread_mutex_lock(&register_mutex);
+    char operation = 'U';//Update!
+    if(n == NULL){//Non dovrebbe mai accadere, ma lo gestiamo lo stesso
+        pthread_mutex_unlock(&register_mutex);
+        return 0;
+    }
+    er = registers_list;
+    while(er){
+    printf("Send_backup guardo il registro %ld\n",er->creation_date);
+    /*GENERO IL MESSAGGIO E LO MANDO DOPO AVER MANDATO IL PRIMO PACCHETTO*/
+    len = generate_entries_list_msg(er,&msg) ;// generate_entries_list_msg(get_open_register(),&entry_list_msg); //Non mandiamo nessun secondo messaggio
+    if(len == 0){
+        printf("Niente da inviare, continuo\n");
+        goto free_and_continue;
+    }
+    printf("Generato il messaggio di lunghezza %dl\n messaggio:\n%s\n",len,msg);
+    len = htonl(len);
+    operations = (unsigned int)operation;
+    operations = htonl(operations);
+    first_packet = operations;
+    first_packet = first_packet<<32 | len;
+    len = ntohl(len);
+    //Mando il primo pacchetto con l'operazione richiesta
+    //e la lunghezza del secondo pacchetto  
+    if(send(n->socket,(void*)&first_packet,sizeof(first_packet),0)<0){
+        perror("Errore in fase di invio\n");
+        pthread_mutex_unlock(&register_mutex);
+        return 0;
+    }
+    printf("Inviato il primo messaggio\n");
+    if(send(n->socket,(void*)msg,len+1,0)<0){//+1 per carattere terminatore
+        perror("Errore in fase di invio\n");
+        pthread_mutex_unlock(&register_mutex);
+        return 0;
+    }
+        printf("Inviato il secondo messaggio\n");
+        free(msg);
+free_and_continue:
+        er = er->next;
+        printf("Prima di free\n");
+        printf("Dopo free\n");
+    }
+    pthread_mutex_unlock(&register_mutex);
+    printf("Copie inviate a %d\n",n->id);
+    return 1;
+}
 
 /**
  * @brief  Lancia send_byebye_message(...) a tutti i membri della neighbors_list
@@ -1163,6 +1226,86 @@ void send_byebye_to_all(){
     pthread_mutex_unlock(&neighbors_list_mutex);
 }
 
+/**
+ * @brief  Invia tutte le entries a tutti i vicini
+ * @note   thread safe per neighbors_list e registers_list
+ * @retval None
+ */
+void send_backups_to_all(){
+    struct neighbour *n;
+    pthread_mutex_lock(&neighbors_list_mutex);
+    n =neighbors_list;
+    while(n){
+        printf("backup to all: Servo %d\n",n->id);
+        if(!send_backups_messages(n)){
+            printf("Erorre nell'invio dei backup a %d",n->id);
+        }
+        n = n->next;
+    }
+    pthread_mutex_unlock(&neighbors_list_mutex);
+}
+
+struct entries_register* get_register_by_creation_date(time_t cd){
+    struct entries_register* er = registers_list;
+    while(er){
+        if(er->creation_date==cd) return er;
+        er = er->next;
+    }
+    return NULL;
+}
+
+/**
+ * @brief  Aggiunge le entry che sono arrivate tramite un messaggio di backup
+ * @note   
+ * @param  msg:char* il messaggio ricevuto
+ * @retval 1 ok, 0 errore nell' inserimento
+ */
+int manage_register_backup(char *msg){
+    time_t cd;
+    struct entries_register *er;
+    struct entry *e;
+    size_t len;
+    int ret;
+    char aux[100];
+    printf("Il messaggio\n%s\n",msg);
+    sscanf(msg,"%s",aux);
+    printf("Letto time_t = %s\n",aux);
+    len = strlen(aux);
+    cd = strtol(aux,NULL,0);
+    pthread_mutex_lock(&register_mutex);
+    er = get_register_by_creation_date(cd);
+    if(er==NULL){
+        printf("er è NULL\n");
+        pthread_mutex_unlock(&register_mutex);
+        return 0;
+    }
+    while(sscanf(msg+len,"%s",aux)==1){
+        len+=strlen(aux)+1;
+        e = malloc(sizeof(struct entry));
+        printf("Leggo riga %s\n",aux);
+        if(sscanf(aux,"%ld.%ld:%c,%ld",
+        &e->timestamp.tv_sec,
+        &e->timestamp.tv_nsec,
+        &e->type,
+        &e->quantity)==4){
+        ret = add_entry_in_register(er,e);
+        if(ret){//È stato effettivamento inserito ( non è un duplicato )
+            //Controlliamo che il registro non sia chiuso
+            er->f=fopen(er->path,"a");
+            fprintf(er->f,"%ld.%ld:%c,%ld\n",e->timestamp.tv_sec,
+            e->timestamp.tv_nsec,
+            e->type,
+            e->quantity);
+            //Infine richiudiamo il registro
+            fclose(er->f);
+        }
+        }else{//messaggio corrotto
+            continue;
+        }
+    }
+    pthread_mutex_unlock(&register_mutex);
+    return 1;
+}
 
 /*
 DS formato messaggio
@@ -1352,6 +1495,7 @@ void serve_peer(int socket_served){
     //printf("L'operazione è %d e la lunghezza è %d\n",options,len);
     operation =(char) options; // ci serve il primo byte
     //printf("operation %c\n",operation);
+    printf("Giunta operazione %c con lungezza %d\n",operation,len);
     switch(operation){
         case 'H': //Nuovo peer (Hello!)
             buffer = malloc(sizeof(char)*len);
@@ -1363,8 +1507,17 @@ void serve_peer(int socket_served){
             //printf("Quello che ho letto %d,%u,%d\n",peer_id,peer_addr.s_addr,peer_port);
             add_neighbour(peer_id,socket_served,peer_addr,peer_port);
             break;
-    case 'P'://Ping
-        printf("Ricevuto un ping da %d\n",socket_served);
+    case 'U'://Update
+        printf("Ricevuto un messaggio di backup da %d\n",socket_served);
+        buffer = malloc(sizeof(char)*len);
+        if(recv(socket_served,(void*)buffer,len,0)<0){
+            perror("Errore in fase di ricezione\n");
+            return;
+        }
+        printf("Messaggio ricevuto\n %s\n",buffer);
+        manage_register_backup(buffer);
+        printf("Lista aggiornata\n");
+        registers_list_print();
         break;
     case 'B'://bye bye
         remove_neighbour(get_neighbour_by_socket(socket_served)->id);
