@@ -63,16 +63,88 @@ struct request{
     time_t timestamp;
     //La socket alla quale inviare il risultato completato il flooding;
     int ret_socket;
+    //Tipo richiesta
+    char request_type;
+    //Data inizio
+    time_t date_start;
+    //Data fine
+    time_t date_end;
     //La lista delle socket dalle quali attendo una risposta
     struct flooding_mate* flooding_list;
-    //La dimensione del buffer
-    int buffer_size;
-    //Le risposte che ho ricevuto
-    char* buffer;
     //Il prossimo elemento in lista
     struct request* next;
 };
 struct request* requestes_list;
+
+
+struct flooding_mate* init_flooding_list(){
+    struct flooging_mate *head;
+    struct flooding_mate *f;
+    struct flooding_mate *prev;
+    struct neighbour *n;
+    head = NULL;
+    prev = NULL;
+    pthread_mutex_lock(&neighbors_list_mutex);
+    n = neighbors_list;
+    while(n){
+        f = malloc(sizeof(struct flooding_mate));
+        f->id = n->id;
+        f->recieved_flag = 0;
+        f->socket = n->socket;
+        f->next = NULL;
+        
+        if(head==NULL){
+            head = f;
+        }
+        if(prev!=NULL){
+            prev->next = f;
+        }
+        prev = f;
+        n = n->next;
+    }
+    pthread_mutex_unlock(&neighbors_list_mutex);
+    return head;
+}
+
+void free_flooding_list(struct flooding_mate* fm){
+    struct flooding_mate *prev;
+    while(fm){
+        prev = fm;
+        fm = fm->next;
+        free(prev);
+    }
+}
+
+int flooding_list_all_checked(struct flooding_mate fm){
+
+}
+
+int flooding_list_check_flooding_mate(struct flooding_mate fm,int socket,int id){
+
+}
+int requestes_list_add(struct request *e){
+
+}
+struct request* init_request(char type,time_t ds,time_t de){
+    struct request *req;
+    int ret;
+    req = malloc(sizeof(struct request));
+    if(req == NULL) return NULL;
+    time(&req->timestamp);
+    if(ds>de){
+        printf("La data di inizio è più grande di quella di fine!\n");
+        return NULL;
+    }
+    req->date_start=ds;
+    req->date_end=de;
+    req->flooding_list = init_flooding_list();
+    req->next = NULL;
+    req->ret_socket = -1; //Sono il destinatario non ne ho bisogno
+    req->request_type = type;
+    req->id = my_id;
+    requestes_list_add(req);
+    return req;
+}
 
 
 struct entry {
@@ -595,7 +667,7 @@ struct entries_register* load_register(char* path){
     strcpy(er->path,path);
     er->entries = NULL;
     er->next = NULL;
-    
+    er->count = 0;
     //if(path==NULL) return;
     er->f = fopen(path,"r");
     while(fscanf(
@@ -1227,22 +1299,115 @@ void send_byebye_to_all(){
 }
 
 /**
+ * @brief  Genera una stringa contenente le entry suddivise per registro
+ * @note   
+ * @param  start:time_t data dalla quale iniziare il backup ( 0 se si desidera generarla dall'inizio) 
+ * @param  end:time_t ultima data prima di completare il backup ( 0 se le si desiderano tutte fino alla fine)
+ * @retval 
+ */
+char* generate_backup_message(time_t start,time_t end){
+    int size;
+    char name[64];
+    char *msg=NULL;
+    char *tot_msg = NULL;
+    struct entries_register *er;
+    er = registers_list;
+    if(er == NULL) return NULL;
+    if(end == 0) end = 0x7fffffffffffffff;
+    printf("%s",ctime(&end));
+    while(er){
+        if(er->creation_date<start){//Data non compresa
+            er = er->next;
+            continue;
+        }
+        if(er->creation_date>end)break;//Abbiamo superato la data di fine
+        sprintf(name,"%ld,%u\n",er->creation_date,er->count);
+        er->f=fopen(er->path,"r");
+        fseek(er->f, 0L, SEEK_SET);
+        fseek(er->f, 0L, SEEK_END);
+        size = ftell(er->f);
+        fseek(er->f, 0L, SEEK_SET);
+        msg = malloc(sizeof(char)*(size+strlen(name)));
+        strcpy(msg,name);
+        if(size == 0){//File vuoto
+            free(msg);
+            msg = NULL;
+            er = er->next;
+            continue;
+        }
+        fread((void*)(msg+strlen(name)),sizeof(char),size,er->f);
+        msg[size+strlen(name)]='\0';
+        if(tot_msg == NULL){
+            tot_msg = malloc(strlen(msg)+1);
+            strcpy(tot_msg,msg);
+            
+        }else{
+            tot_msg = realloc(tot_msg,(strlen(tot_msg)+strlen(msg)+1));
+            //tot_msg[strlen(tot_msg)] = '\n';
+            strncat(tot_msg,msg,strlen(msg));
+        }
+        fclose(er->f);
+        er = er->next;
+        
+    }
+    return tot_msg;
+}
+/**
  * @brief  Invia tutte le entries a tutti i vicini
  * @note   thread safe per neighbors_list e registers_list
  * @retval None
  */
 void send_backups_to_all(){
+    //struct neighbour *n;
+    uint64_t first_packet=0; // contiene la lunghezza del prossimo messaggio e del codice
+    uint32_t len; // lunghezza messaggio
+    uint32_t operations=0;
     struct neighbour *n;
     pthread_mutex_lock(&neighbors_list_mutex);
-    n =neighbors_list;
-    while(n){
-        printf("backup to all: Servo %d\n",n->id);
-        if(!send_backups_messages(n)){
-            printf("Erorre nell'invio dei backup a %d",n->id);
-        }
-        n = n->next;
+    char operation = 'U';//Update!
+    char *msg = generate_backup_message(0,0);
+    n = neighbors_list;
+    if(n==NULL){
+        printf("Nessun vicino!\n");
+        goto end_send_to_all;
+        return;
     }
+    //msg = generate_backup_message(0,0);// generate_entries_list_msg(get_open_register(),&entry_list_msg); //Non mandiamo nessun secondo messaggio
+    if(msg==NULL){
+        printf("Niente da inviare\n");
+        goto end_send_to_all;
+        return;
+    }
+    len = strlen(msg);
+    len = htonl(len);
+    operations = (unsigned int)operation;
+    operations = htonl(operations);
+    first_packet = operations;
+    first_packet = first_packet<<32 | len;
+    len = ntohl(len);
+    while(n){
+        printf("Generato il messaggio di lunghezza %dl\n messaggio:\n%s\n",len,msg);
+    //Mando il primo pacchetto con l'operazione richiesta
+    //e la lunghezza del secondo pacchetto  
+        if(send(n->socket,(void*)&first_packet,sizeof(first_packet),0)<0){
+            perror("Errore in fase di invio");
+            n=n->next;
+            continue;
+        }
+        printf("Inviato il primo messaggio\n");
+        if(send(n->socket,(void*)msg,len+1,0)<0){//+1 per carattere terminatore
+            perror("Errore in fase di invio");
+            n=n->next;
+            continue;
+        }
+        printf("Backup inviato a %d porta=%u\n",n->id,n->addr.sin_port);
+        n=n->next;
+        printf("Fine loop\n");
+    }
+    
+end_send_to_all:
     pthread_mutex_unlock(&neighbors_list_mutex);
+    printf("Fine invio backup!\n");
 }
 
 struct entries_register* get_register_by_creation_date(time_t cd){
@@ -1258,53 +1423,56 @@ struct entries_register* get_register_by_creation_date(time_t cd){
  * @brief  Aggiunge le entry che sono arrivate tramite un messaggio di backup
  * @note   
  * @param  msg:char* il messaggio ricevuto
- * @retval 1 ok, 0 errore nell' inserimento
+ * @retval 1 almeno un inserimento, 0 nessun inserimento
  */
 int manage_register_backup(char *msg){
     time_t cd;
     struct entries_register *er;
     struct entry *e;
-    size_t len;
-    int ret;
+    size_t len = 0;
+    int final_ret = 0;
+    int ret=0;
+    int loop_size;
     char aux[100];
     printf("Il messaggio\n%s\n",msg);
-    sscanf(msg,"%s",aux);
-    printf("Letto time_t = %s\n",aux);
-    len = strlen(aux);
-    cd = strtol(aux,NULL,0);
     pthread_mutex_lock(&register_mutex);
-    er = get_register_by_creation_date(cd);
-    if(er==NULL){
-        printf("er è NULL\n");
-        pthread_mutex_unlock(&register_mutex);
-        return 0;
-    }
     while(sscanf(msg+len,"%s",aux)==1){
-        len+=strlen(aux)+1;
-        e = malloc(sizeof(struct entry));
-        printf("Leggo riga %s\n",aux);
-        if(sscanf(aux,"%ld.%ld:%c,%ld",
-        &e->timestamp.tv_sec,
-        &e->timestamp.tv_nsec,
-        &e->type,
-        &e->quantity)==4){
-        ret = add_entry_in_register(er,e);
-        if(ret){//È stato effettivamento inserito ( non è un duplicato )
-            //Controlliamo che il registro non sia chiuso
-            er->f=fopen(er->path,"a");
-            fprintf(er->f,"%ld.%ld:%c,%ld\n",e->timestamp.tv_sec,
-            e->timestamp.tv_nsec,
-            e->type,
-            e->quantity);
-            //Infine richiudiamo il registro
-            fclose(er->f);
-        }
-        }else{//messaggio corrotto
-            continue;
+        len += strlen(aux)+1;
+        sscanf(aux,"%ld,%u",&cd,&loop_size);
+        er = get_register_by_creation_date(cd);
+        for(int i=0;i<loop_size;i++){
+            sscanf(msg+len,"%s",aux);
+            len+=strlen(aux)+1;
+            e = malloc(sizeof(struct entry));
+            printf("Leggo riga %s\n",aux);
+            if(sscanf(aux,"%ld.%ld:%c,%ld",
+            &e->timestamp.tv_sec,
+            &e->timestamp.tv_nsec,
+            &e->type,
+            &e->quantity)==4){
+                if(er==NULL){
+                    printf("er è NULL\n");
+                    continue;
+                }
+                ret = add_entry_in_register(er,e);
+                if(ret){//È stato effettivamento inserito ( non è un duplicato )
+                    //Controlliamo che il registro non sia chiuso
+                    final_ret = final_ret || ret;
+                    er->f=fopen(er->path,"a");
+                    fprintf(er->f,"%ld.%ld:%c,%ld\n",e->timestamp.tv_sec,
+                    e->timestamp.tv_nsec,
+                    e->type,
+                    e->quantity);
+                    //Infine richiudiamo il registro
+                    fclose(er->f);
+                }
+            }else{//messaggio corrotto
+                continue;
+            }
         }
     }
     pthread_mutex_unlock(&register_mutex);
-    return 1;
+    return final_ret;
 }
 
 /*
