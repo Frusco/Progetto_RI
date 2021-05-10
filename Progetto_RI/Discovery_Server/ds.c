@@ -178,26 +178,54 @@ void timer_list_add(int id){
     pthread_mutex_unlock(&timer_mutex);
 }
 
-pthread_mutex_t sinc_time_mutex;
-time_t sinc_time;
-void sinc_time_add_day(){
-    pthread_mutex_lock(&sinc_time_mutex);
+pthread_mutex_t sync_time_mutex;
+time_t sync_time;
+void sync_time_add_day(){
+    pthread_mutex_lock(&sync_time_mutex);
     //Aggiungo un giorno
-    sinc_time+= 86400;
-    pthread_mutex_unlock(&sinc_time_mutex);
+    sync_time+= 86400;
+    pthread_mutex_unlock(&sync_time_mutex);
 }
-void sinc_time_set(time_t t){
-    pthread_mutex_lock(&sinc_time_mutex);
+void sync_time_set(time_t t){
+    pthread_mutex_lock(&sync_time_mutex);
     //Aggiungo un giorno
-    sinc_time=t;
-    pthread_mutex_unlock(&sinc_time_mutex);
+    sync_time=t;
+    pthread_mutex_unlock(&sync_time_mutex);
 }
-time_t sinc_time_get(){
+time_t sync_time_get(){
     time_t ret;
-    pthread_mutex_lock(&sinc_time_mutex);
-    ret = sinc_time;
-    pthread_mutex_unlock(&sinc_time_mutex);
+    pthread_mutex_lock(&sync_time_mutex);
+    ret = sync_time;
+    pthread_mutex_unlock(&sync_time_mutex);
     return ret;
+}
+
+void sync_time_save(){
+    FILE *f;
+    pthread_mutex_lock(&sync_time_mutex);
+    f = fopen(SYNC_TIME_PATH,"w");
+    fprintf(f,"%ld",sync_time);
+    fclose(f);
+    pthread_mutex_unlock(&sync_time_mutex);
+}
+time_t sync_time_load(){
+    FILE *f;
+    time_t t;
+    int ret;
+    f = fopen(SYNC_TIME_PATH,"r");
+    pthread_mutex_lock(&sync_time_mutex);
+    if(f){
+        ret = fscanf(f,"%ld",&sync_time);
+        if(ret==0){
+            time(&sync_time);
+        }
+    }else{
+        time(&sync_time);
+    }
+    t = sync_time;
+    if(f)fclose(f);
+    pthread_mutex_unlock(&sync_time_mutex);
+    return t;
 }
 /*
 Elemento che definisce un peer in una lista ordinata
@@ -304,7 +332,7 @@ void globals_init(){
 // Gli elementi vuoti della peers_table sono identificati con porta = -1
         peers_table[i].port = -1;
     }
-    sinc_time = 0;
+    sync_time = 0;
     pthread_mutex_init(&list_mutex,NULL);
     pthread_mutex_init(&table_mutex,NULL);
     pthread_mutex_init(&timer_mutex,NULL);
@@ -797,8 +825,11 @@ void* thread_ds_loop(void* arg){
     struct in_addr peer_in_addr;
     int peer_port=-1;
     time_t time_recived;
-    time_t cur_sinc_time;
+    time_t cur_sync_time;
     int id;
+    printf("prima di loaf");
+    cur_sync_time = sync_time_load();
+    printf("dopo di loaf");
     if(open_udp_socket(&ds_socket,&ds_addr,port)){
         perror("[DS_Thread]: Impossibile aprire socket");
         loop_flag = 0;
@@ -825,13 +856,13 @@ void* thread_ds_loop(void* arg){
             timer_list_add(id);
         }
         if(option =='r'){//Segnale di sincronizzazione
-            cur_sinc_time = sinc_time_get();
-            if(cur_sinc_time>time_recived){//Informo che necessita sincronizzarsi
-                sprintf(buffer,"%ld",cur_sinc_time);
+            cur_sync_time = sync_time_get();
+            if(cur_sync_time>time_recived){//Informo che necessita sincronizzarsi
+                sprintf(buffer,"%ld",cur_sync_time);
                 sendto(ds_socket,buffer,(strlen(buffer)+1),0,(struct sockaddr*)&peer_addr,peer_addrlen);
-            }else if(cur_sinc_time<time_recived){
-                sinc_time_set(time_recived);
-                printf("Aggiorno la data sinc_time! %ld\n",sinc_time);
+            }else if(cur_sync_time<time_recived){
+                sync_time_set(time_recived);
+                printf("Aggiorno la data sync_time! %ld\n",sync_time);
             }
         }else if(option == 'x'){// Se x richiede anche la lista dei vicini
             msg_len = generate_neighbors_list_message(id,&msg);
@@ -843,6 +874,7 @@ void* thread_ds_loop(void* arg){
          
     }
     close(ds_socket);
+    sync_time_save(cur_sync_time);
     pthread_exit(NULL);
 }
 
@@ -952,7 +984,7 @@ void user_loop(int port){
                 //peers_table_print_all_peers();
             break;
             case 5:
-                sinc_time_add_day();
+                sync_time_add_day();
                 printf("Segnalato\n");
                 //peers_table_print_all_peers();
             break;

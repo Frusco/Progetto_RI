@@ -15,6 +15,9 @@
 #define SERVER_COMMAND_LIST {"help","showpeers","showneighbor","esc","showpeersinfo","closeday"}
 #define SERVER_HELP_MSG "showpeers : mostra la lista dei peers ordinata per porta\nshowneighbor <ID> : mostra i vicini del peer richiesto\nshowpeersinfo : mostra nel dettaglio le informazioni di tutti i peers\ncloseday: segnala ai peer di chiudere il registro di oggi\nesc: chiudi il server\n"
 #define DEFAULT_TIME_TO_LIVE 5
+#define SYNC_TIME_PATH "sync_time.txt"
+#define END_REG_HOUR 18
+#define END_REG_MINUTES 0
 // Peer consts
 #define DEFAULT_DS_PORT 4242
 #define DEFAULT_PEER_PORT 25566

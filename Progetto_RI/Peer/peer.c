@@ -75,8 +75,10 @@ struct request{
     time_t timestamp;
     //La socket alla quale inviare il risultato completato il flooding;
     int ret_socket;
+    //Tipo entry
+    char entry_type;
     //Tipo richiesta
-    char request_type;
+    char req_type;
     //Data inizio
     time_t date_start;
     //Data fine
@@ -93,7 +95,8 @@ struct request* requestes_list;
  * @note   Guarda neighbors_list , init_request
  * @retval 
  */
-struct flooding_mate* init_flooding_list(){
+void flooding_list_print(struct flooding_mate* fm);
+struct flooding_mate* init_flooding_list(int avoid_socket){
     struct flooding_mate *head;
     struct flooding_mate *f;
     struct flooding_mate *prev;
@@ -103,6 +106,7 @@ struct flooding_mate* init_flooding_list(){
     pthread_mutex_lock(&neighbors_list_mutex);
     n = neighbors_list;
     while(n){
+        if(n->socket == avoid_socket)goto skip_add;
         f = malloc(sizeof(struct flooding_mate));
         f->id = n->id;
         f->recieved_flag = 0;
@@ -116,9 +120,11 @@ struct flooding_mate* init_flooding_list(){
             prev->next = f;
         }
         prev = f;
+    skip_add:
         n = n->next;
     }
     pthread_mutex_unlock(&neighbors_list_mutex);
+    flooding_list_print(head);
     return head;
 }
 
@@ -146,6 +152,7 @@ void free_flooding_list(struct flooding_mate* fm){
 int flooding_list_all_checked(struct flooding_mate *fm){
     while(fm){
         if(!fm->recieved_flag)return 0;
+        fm = fm->next;
     }
     return 1;
 }
@@ -158,15 +165,29 @@ int flooding_list_all_checked(struct flooding_mate *fm){
  * @param  id:int id del peer da flaggare
  * @retval int 1 l'operazione ha avuto successo, 0 altrimenti
  */
-int flooding_list_check_flooding_mate(struct flooding_mate *fm,int socket,int id){
+int flooding_list_check_flooding_mate(struct flooding_mate *fm,int id,int socket){
     while(fm){
+        printf("Provo con  fmid=%d, fmso=%d confronto con id:%d socket:%d -> %d&&%d = %d",fm->id,fm->socket,id,socket,fm->socket==socket,fm->id==id,fm->socket==socket && fm->id==id);
         if(fm->socket==socket && fm->id==id){
+            printf("Beccato il vicino id=%d, so=%d",fm->id,fm->socket);
             fm->recieved_flag = 1;
             return 1;
         }
+        fm = fm->next;
     }
+    printf("check flooding mate: Trovato niente\n");
     return 0;
 }
+
+void flooding_list_print(struct flooding_mate* fm){
+    printf("Flooding list:\n");
+    while(fm){
+        printf("[id:%d,socket:%d,flag:%d]",fm->id,fm->socket,fm->recieved_flag);
+        fm = fm->next;
+    }
+    printf("\n");
+}
+
 int requestes_list_add(struct request *e){
     struct request *cur;
     struct request *prev;
@@ -196,12 +217,21 @@ struct request* requestes_list_get(time_t t,int id){
     return NULL;
 }
 
-
+void requestes_list_print(){
+    struct request *cur;
+    cur = requestes_list;
+    printf("Lista richieste:\n");
+    while(cur){
+        printf("req id:%d,socket:%d,r_type:%c,e_type:%c\n",cur->id,cur->ret_socket,cur->entry_type,cur->req_type);
+        cur = cur->next;
+    }
+}
 
 /**
  * @brief  Genera una Request di elebaorazione e la inserisce nella requests_list
  * @note   
- * @param  type:char il tipo di richiesta
+ * @param  type:char il tipo di entry ( tampone o nuovi casi )
+ * @param  req_type:char tipo di richiesta ( totale o variazione )
  * @param  *ds:time_t puntatore alla data di inizio ( NULL per default data minima )
  * @param  *de:time_t puntatore alla data di fine ( NULL per dafault data massima )
  * @param  *socket:int puntatore alla socket del richiedente 
@@ -210,7 +240,7 @@ struct request* requestes_list_get(time_t t,int id){
  *         ( NULL se siamo noi a generare la richiesta )
  * @retval puntatore alla struttura request generata
  */
-struct request* init_request(char type,time_t *ds,time_t *de,int *socket,int *id){
+struct request* init_request(char type,char req_type,time_t *ds,time_t *de,int *socket,int *id){
     struct request *req;
     req = malloc(sizeof(struct request));
     if(req == NULL) return NULL;
@@ -221,10 +251,12 @@ struct request* init_request(char type,time_t *ds,time_t *de,int *socket,int *id
     }
     req->date_start=(ds==NULL)?0:*ds;
     req->date_end=(de==NULL)?0x7fffffffffffffff:*de;
-    req->flooding_list = init_flooding_list();
+    req->ret_socket = (socket==NULL)?-1:*socket;//Se NULL sono io che faccio la richiesta
+    req->flooding_list = init_flooding_list(req->ret_socket);
     req->next = NULL;
     req->ret_socket = (socket==NULL)?-1:*socket;//Se NULL sono io che faccio la richiesta
-    req->request_type = type;
+    req->entry_type = type;
+    req->req_type = req_type;
     req->id = (id==NULL)?my_id:*id;
     requestes_list_add(req);
     return req;
@@ -328,18 +360,24 @@ struct entries_register* get_open_register(){
     // Nessun registro aperto!
     return NULL;
 }
-/**
- * @brief  Carica il register da file
- * @note   
- * @param  f: 
- * @retval 
- */
-/*struct entries_register* load_register(FILE f){
-    
-}
-void save_register(){
 
-}*/
+
+struct entries_register* get_last_closed_register(){
+    struct entries_register* cur;
+    struct entries_register* prev;
+    cur = registers_list;
+    prev = NULL;
+    while(cur){
+        printf("Cur è %d",cur->is_open);
+        if(cur->is_open){ return prev;}
+        else {
+            prev = cur;
+            cur = cur->next;
+        }
+    }
+    // Nessun registro aperto!
+    return NULL;
+}
 
 /**
  * @brief  Cerca la prima lista aperta della registers_list e 
@@ -607,7 +645,7 @@ struct neighbour* add_neighbour(int id,int socket,struct in_addr addr,int port) 
     neighbors_list_add(n);
     printf("Tutto fatto\n");
     pthread_mutex_unlock(&neighbors_list_mutex);
-    neighbors_list_print();
+   // neighbors_list_print();
     return n;
 }
 
@@ -671,7 +709,24 @@ struct entries_register* open_today_register(){
     return er;
 }
 
-
+struct entries_register* init_closed_register(time_t cd){
+    char filename[20];
+    struct entries_register  *er;
+    er = malloc(sizeof(struct entries_register));
+    er->creation_date = cd;
+    er->count = 0;
+    er->entries = NULL;
+    er->f = 0;
+    er->is_open = 0;
+    er->next = NULL;
+    sprintf(filename,"%d-%ld",er->is_open,er->creation_date);
+    er->path = malloc(sizeof(char)*(strlen(my_path)+strlen(filename)+7));
+    strcpy(er->path,my_path);
+    strcat(er->path,"/");
+    strcat(er->path,filename);
+    strcat(er->path,".txt");
+    return er;
+}
 
 /**
  * @brief  Chiude il registro di oggi e il relativo file cambiandogli nome
@@ -692,10 +747,10 @@ void close_today_register_file(){
     old_path = malloc(sizeof(char)*(strlen(er->path)+1));
     strcpy(old_path,er->path);
     er->is_open = 0;
-    fclose(er->f);
     //Cambio nome al file per contrassegnarlo come chiuso
     while(er->path[position]!='-') position--;
     er->path[position-1] = '0';
+    printf("Rename:\nold: %s\nnew: %s\n",old_path,er->path);
     rename(old_path,er->path);
 }
 
@@ -736,7 +791,7 @@ time_t get_current_open_date(){
 }
 
 /**
- * @brief  Carica il registro dal file
+ * @brief  Carica il registro dal file current_open_date
  * @note   formato <secondi>.<nano>:<tipo>,<quantità>
  * @param  path:char* stringa del path 
  * @retval None
@@ -933,8 +988,8 @@ void registers_list_init(){
     char *path_n_file_name;
     d = opendir(my_path);
     if (d) {
-        while ((dir = readdir(d)) != NULL) {
-            if(strcmp((dir->d_name+strlen(dir->d_name)-3),"txt")==0){
+        while ((dir = readdir(d)) != NULL) {//Leggo il nome del file
+            if(strcmp((dir->d_name+strlen(dir->d_name)-3),"txt")==0){//Controllo che sia un txt
                 printf("%s estensione %s\n", dir->d_name,(dir->d_name+strlen(dir->d_name)-3));
                 path_n_file_name = malloc(sizeof(char)*(strlen(my_path)+strlen(dir->d_name)+2));//+2 perché considero anche '/' e "\n"
                 strcpy(path_n_file_name,my_path);
@@ -1003,8 +1058,109 @@ int find_command(char* command){
     return -1;
 }
 
+/**
+ * @brief  Controlla il formato della data assumendone la sua correttezza
+ * @note   vedi add_new_request
+ * @param  *dates: 
+ * @retval int -1 nessuna data, 0 start e end presenti , 1 solo start presente , 2 solo end presente
+ */
+int check_date_format(char *dates){
+    char *aux;
+    if(dates==NULL)return -1;
+    if(strcmp(dates,"")==0)return -1;
+    aux = strtok(dates,"-");
+    printf("Stringa trovata %s",aux);
+    if(strlen(aux)==1) return 2;
+    if(strlen(dates+strlen(aux)+1)==1)return 1;
+    return 0;
+}
 
-
+struct request* add_new_request(char rt, char t, char* dates){
+    time_t *start,*end;
+    struct entries_register *last_closed_reg;
+    struct tm s,e;
+    start =NULL;
+    end = NULL;
+    if(rt!='t' && rt!='v'){
+        printf("Tipo di richiesta errata \n");
+        return NULL;
+    }
+    if(t!='t' && t!='n'){
+        printf("Tipo entry errata\n");
+        return NULL;
+    }
+    printf("prima del get\n");
+    last_closed_reg = get_last_closed_register();
+    printf("dopo del get\n");
+    if(last_closed_reg==NULL){
+        printf("Non esiste ancora un registro chiuso!\n");
+        return NULL;
+    }
+    memset(&s,0,sizeof(struct tm));
+    memset(&e,0,sizeof(struct tm));
+    switch(check_date_format(dates)){
+        case 0://start ed end presenti
+            start = malloc(sizeof(time_t));
+            end = malloc(sizeof(time_t));
+            if(sscanf(dates,"%d:%d:%d-%d:%d:%d",
+            &s.tm_mday,
+            &s.tm_mon,
+            &s.tm_yday,
+            &e.tm_mday,
+            &e.tm_mon,
+            &e.tm_yday)<6){
+                printf("Date non valide\nFormato corretto: dd1:mm1:yyyy1-dd2:mm2:yyyy2\n");
+                return NULL;
+            }
+            s.tm_mon -=1;
+            e.tm_mon -=1;
+            s.tm_yday -=1900;
+            e.tm_yday -=1900;
+            *start = mktime(&s);
+            *end = mktime(&e);
+            if(*start>*end){
+                printf("Data inizio è più grande di data fine! Intendevi il contrario?\n");
+                return NULL;
+            }
+        break;
+        case 1://solo start presente
+        start = malloc(sizeof(time_t));
+        end = malloc(sizeof(time_t));
+        if(sscanf(dates,"%d:%d:%d-*",
+            &s.tm_mday,
+            &s.tm_mon,
+            &s.tm_yday)<3){
+                printf("Date non valide\nFormato corretto: dd1:mm1:yyyy1-dd2:mm2:yyyy2\n");
+                return NULL;
+            }
+            s.tm_mon -=1;
+            s.tm_yday -=1900;
+            *start = mktime(&s);
+            *end = last_closed_reg->creation_date;
+            
+        break;
+        case 2://solo end presente
+            end = malloc(sizeof(time_t));
+            if(sscanf(dates,"*-%d:%d:%d",
+                &e.tm_mday,
+                &e.tm_mon,
+                &e.tm_yday)<3){
+                    printf("Date non valide\nFormato corretto: dd1:mm1:yyyy1-dd2:mm2:yyyy2\n");
+                    return NULL;
+                }
+                e.tm_mon -=1;
+                e.tm_yday -=1900;
+                *end = mktime(&e);
+        break;
+    }
+    
+    if(last_closed_reg->creation_date>*end){
+        printf("Data fine troppo grande, aggiornata con l'ultimo registro aperto\n");
+        *end = last_closed_reg->creation_date;
+    }
+    
+    return init_request(t,rt,start,end,NULL,NULL);
+}
 
 
 
@@ -1030,6 +1186,7 @@ void send_exit_packet(int ds_port){
 }
 */
 void send_backups_to_all();
+void send_request_to_all(struct request *r,int *avoid_socket);
 void* ds_comunication_loop(void*arg);
 void send_byebye_to_all();
 /**
@@ -1044,14 +1201,14 @@ void user_loop(){
     int port;
     int args_number;
     int command_index;
-    char args[3][PEER_MAX_COMMAND_SIZE];
+    char args[4][PEER_MAX_COMMAND_SIZE];
     char type;
     long quantity;
     printf(PEER_WELCOME_MSG);
     while(loop_flag){
         printf(">> ");
         fgets(msg, 40, stdin);
-        args_number = sscanf(msg,"%s %s %s",args[0],args[1],args[2]);
+        args_number = sscanf(msg,"%s %s %s %s",args[0],args[1],args[2],args[3]);
         //arg_len = my_parser(&args,msg);
         if(args_number>0){
             command_index = find_command(args[0]);
@@ -1074,7 +1231,8 @@ void user_loop(){
                     perror("Errore nella creazione del thread\n");
                     exit(EXIT_FAILURE);
                 }
-                sleep(2);
+                registers_list_print();
+                sleep(1);
                 break;
             //__add__
             case 2:
@@ -1110,18 +1268,29 @@ void user_loop(){
             break;
             //__get__
             case 3:
-                printf("to do\n");
-                
-            break;
+                if(args_number<3){
+                    printf("Inserire aggr type period\n");
+                    break;
+                }
+                if(args_number<4){
+                    strcpy(args[3],"");
+                }
+                send_request_to_all(add_new_request(args[1][0],args[2][0],args[3]),NULL);
+                requestes_list_print();
+                break;
             //__esc__
             case 4:
                 printf("Chiusura in corso...\n");
-                ds_option_set('b');
-                pthread_join(ds_comunication_thread,&ret);
+                printf("Invio il backup a tutti\n");
                 send_backups_to_all();
                 sleep(1);
+                printf("Imposto l'uscita a udp e attendo\n");
+                ds_option_set('b');
+                pthread_join(ds_comunication_thread,&ret);
+                printf("Thread morto, invio byebye a tutti\n");
                 send_byebye_to_all();
                 loop_flag = 0;
+                printf("Loop_flag a zero attendo il thread TCP\n");
                 pthread_join(tcp_comunication_thread,&ret);
                 printf("Socket chiusa\n");
                 
@@ -1345,15 +1514,25 @@ char* generate_backup_message(time_t *s,time_t *e){
     if(er == NULL) return NULL;
     end = (e==NULL)?0x7fffffffffffffff:*e;
     start = (s==NULL)?0:*s;
-    printf("%s",ctime(&end));
+    printf("Prima di stampare end\n");
+    //printf("%s",ctime(&end));
     while(er){
+        printf("er = %ld\n",er->creation_date);
         if(er->creation_date<start){//Data non compresa
             er = er->next;
             continue;
         }
         if(er->creation_date>end)break;//Abbiamo superato la data di fine
+        printf("Prima di stampare il nome\n");
+        printf("%ld,%u\npath:%s\n",er->creation_date,er->count,er->path);
         sprintf(name,"%ld,%u\n",er->creation_date,er->count);
+        printf("Prima di aprire il file\n");
         er->f=fopen(er->path,"r");
+        if(er->f==NULL){
+            printf("file non presente, continuo\n");
+            er = er->next;
+            continue;
+        }
         fseek(er->f, 0L, SEEK_SET);
         fseek(er->f, 0L, SEEK_END);
         size = ftell(er->f);
@@ -1369,15 +1548,21 @@ char* generate_backup_message(time_t *s,time_t *e){
         fread((void*)(msg+strlen(name)),sizeof(char),size,er->f);
         msg[size+strlen(name)]='\0';
         if(tot_msg == NULL){
+            printf("Faccio la malloc\n");
             tot_msg = malloc(strlen(msg)+1);
+            printf("Faccio la strcpy\n");
             strcpy(tot_msg,msg);
             
         }else{
+            printf("Faccio realloc\n");
             tot_msg = realloc(tot_msg,(strlen(tot_msg)+strlen(msg)+1));
             //tot_msg[strlen(tot_msg)] = '\n';
+            printf("Faccio la cat\n");
             strncat(tot_msg,msg,strlen(msg));
         }
+        printf("Prima di chiudere il file\n");
         fclose(er->f);
+        printf("Messaggio parziale %s",tot_msg);
         er = er->next;
         
     }
@@ -1395,14 +1580,15 @@ void send_backups_to_all(){
     uint32_t operations=0;
     struct neighbour *n;
     pthread_mutex_lock(&neighbors_list_mutex);
-    char operation = 'U';//Update!
-    char *msg = generate_backup_message(NULL,NULL);
     n = neighbors_list;
     if(n==NULL){
         printf("Nessun vicino!\n");
         goto end_send_to_all;
         return;
     }
+    char operation = 'U';//Update!
+    printf("Genero il messaggio di backup\n");
+    char *msg = generate_backup_message(NULL,NULL);
     if(msg==NULL){
         printf("Niente da inviare\n");
         goto end_send_to_all;
@@ -1432,9 +1618,8 @@ void send_backups_to_all(){
         }
         printf("Backup inviato a %d porta=%u\n",n->id,n->addr.sin_port);
         n=n->next;
-        printf("Fine loop\n");
     }
-    
+free(msg);
 end_send_to_all:
     pthread_mutex_unlock(&neighbors_list_mutex);
     printf("Fine invio backup!\n");
@@ -1450,7 +1635,7 @@ char* generate_request_message(struct request *r){
     char* msg;
     char aux[128];
     if(r==NULL)return NULL;
-    sprintf(aux,"%d,%ld,%ld,%ld,%c\n",r->id,r->timestamp,r->date_start,r->date_end,r->request_type);
+    sprintf(aux,"%d,%ld,%ld,%ld,%c,%c\n",r->id,r->timestamp,r->date_start,r->date_end,r->entry_type,r->req_type);
     msg = malloc(strlen(aux));
     strcpy(msg,aux);
     return msg;
@@ -1508,13 +1693,13 @@ void send_request_to_all(struct request *r,int *avoid_socket){
             n=n->next;
             continue;
         }
-        printf("Inviato il primo messaggio\n");
-        if(send(n->socket,(void*)msg,len+1,0)<0){//+1 per carattere terminatore
+        printf("Inviato il primo messaggio di request\n");
+        if(send(n->socket,(void*)msg,len,0)<0){//+1 per carattere terminatore
             perror("Errore in fase di invio");
             n=n->next;
             continue;
         }
-        printf("Backup inviato a %d porta=%u\n",n->id,n->addr.sin_port);
+        printf("Request inviato a %d porta=%u\n",n->id,n->addr.sin_port);
         n=n->next;
         printf("Fine loop\n");
     }
@@ -1548,24 +1733,27 @@ void send_request_data(struct request *r){
         return;
     }
     msg =malloc(strlen(backup)+strlen(req_header)+1);
+    printf("BACKUP:\n%s\nHEADER:%s\n",backup,req_header);
     strcpy(msg,req_header);
+    printf("MSG_parziale:%s",msg);
     strcat(msg,backup);
-    len = strlen(msg);
+    printf("MSG_completato:%s",msg);
+    len = strlen(msg)+1;
+    for(int i=0;i<len;i++)printf("%c",msg[i]);
     len = htonl(len);
     operations = (unsigned int)operation;
     operations = htonl(operations);
     first_packet = operations;
     first_packet = first_packet<<32 | len;
     len = ntohl(len);
-    printf("Generato il messaggio di lunghezza %dl\n messaggio:\n%s\n",len,msg);
+    printf("Request DATA:\n -lunghezza %u\n -messaggio:\n%s\n",len,msg);
     //Mando il primo pacchetto con l'operazione richiesta
     //e la lunghezza del secondo pacchetto  
         if(send(r->ret_socket,(void*)&first_packet,sizeof(first_packet),0)<0){
             perror("Errore in fase di invio");
             goto req_end;
         }
-        printf("Inviato il primo messaggio\n");
-        if(send(r->ret_socket,(void*)msg,len+1,0)<0){//+1 per carattere terminatore
+        if(send(r->ret_socket,(void*)msg,len,0)<0){//+1 per carattere terminatore
             perror("Errore in fase di invio");
             goto req_end;
         }
@@ -1588,18 +1776,23 @@ int manage_request_answer(char *buffer,int socket){
     struct neighbour *n;
     struct request *r;
     int id;
-    char t;//type
+    char t,rt;//type, req_type
     time_t s,e,tp;//start,end,timestamp
     char aux[128];
     sscanf(buffer,"%s",aux);
     index+=strlen(aux)+1;
-    sscanf(aux,"%d,%ld,%ld,%ld,%c",&id,&tp,&s,&e,&t);
-    r = requestes_list_get(id,tp);
+    printf("La prima riga di A è %s",aux);
+    sscanf(aux,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt);
+    r = requestes_list_get(tp,id);
     if(r==NULL){//Non dovrebbe accadere, ma la gestiamo
         printf("Risposta di una richiesta inesistente\n");
         return 0;
     }
+    printf("Prima di get neighbour by socket\n");
     n = get_neighbour_by_socket(socket);
+    printf("Controllo la flooding list\n");
+    printf("Socket che sto servendo: %d, nid=%d ns=%d\n",socket,n->id,n->socket);
+    flooding_list_print(r->flooding_list);
     if(!flooding_list_check_flooding_mate(r->flooding_list,n->id,socket)){
         printf("Il vicino %d non è in lista!\n",n->id);
         /*Qualcosa è andato storto, abbiamo ricevuto un pacchetto
@@ -1607,6 +1800,7 @@ int manage_request_answer(char *buffer,int socket){
         */
         return 0;
     }
+    printf("Passo a manage_register_backup con\n %s\n",buffer+index);
     manage_register_backup(buffer+index);
     if(flooding_list_all_checked(r->flooding_list)){
         if(r->ret_socket==-1){//Sono io che ho iniziato la richiesta
@@ -1639,14 +1833,15 @@ int send_ignore_my_answer(char *msg,int socket){
     first_packet = operations;
     first_packet = first_packet<<32 | len;
     len = ntohl(len);
+    printf("Request IGNORE:\n -lunghezza %u\n -messaggio:\n%s\n",len,msg);
     if(send(socket,(void*)&first_packet,sizeof(first_packet),0)<0){
             perror("Errore in fase di invio");
             return 0;
         }
-        printf("Inviato il primo messaggio\n");
-        if(send(socket,(void*)msg,len+1,0)<0){//+1 per carattere terminatore
-            perror("Errore in fase di invio");
-            return 0;
+    printf("Inviato il primo messaggio\n");
+    if(send(socket,(void*)msg,len,0)<0){//+1 per carattere terminatore
+        perror("Errore in fase di invio");
+        return 0;
     }
     return 1;
 }
@@ -1661,9 +1856,9 @@ int send_ignore_my_answer(char *msg,int socket){
 int manage_new_request(char *buffer,int socket){
     struct request *r;
     int id;
-    char t;//type
+    char t,rt;//type,req_type
     time_t s,e,tp;//start,end,timestamp  
-    sscanf(buffer,"%d,%ld,%ld,%ld,%c",&id,&tp,&s,&e,&t);
+    sscanf(buffer,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt);
     r = requestes_list_get(tp,id);
     if(r){
         printf("Richiesta già presente, gestisco il loop\n");
@@ -1676,9 +1871,14 @@ int manage_new_request(char *buffer,int socket){
         return 0;
     }
     //Una nuova richiesta!
-    r = init_request(t,&s,&e,&socket,&id);
-    //Propago la richiesta!
-    send_request_to_all(r,&socket);
+    r = init_request(t,rt,&s,&e,&socket,&id);
+    if(r->flooding_list==NULL){
+    //Non devo inoltrare la richiesta a nessuno
+    //Quindi ripondo subito
+        send_request_data(r);
+    }else{
+        send_request_to_all(r,&socket);
+    }
     return 1;
 }
 /**
@@ -1691,9 +1891,9 @@ int manage_new_request(char *buffer,int socket){
 int manage_ignore_answer(char* buffer, int socket){
     struct request *r;
     int id;
-    char t;//type
+    char t,rt;//type req_type
     time_t s,e,tp;//start,end,timestamp  
-    sscanf(buffer,"%d,%ld,%ld,%ld,%c",&id,&tp,&s,&e,&t);
+    sscanf(buffer,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt);
     r = requestes_list_get(tp,id);
     if(r == NULL){
         /*Qualcosa è andato storto ho ricevuto il messaggio
@@ -1701,7 +1901,15 @@ int manage_ignore_answer(char* buffer, int socket){
        return 0;
     }
     //Lo flaggo e ignoro
-    flooding_list_check_flooding_mate(r->flooding_list,socket,id);
+    flooding_list_check_flooding_mate(r->flooding_list,id,socket);
+    if(flooding_list_all_checked(r->flooding_list)){
+        if(r->ret_socket==-1){//Sono io che ho iniziato la richiesta
+            //TO DO
+            printf("FATTO!\n");
+        }else{//Invio il risultato alla ret_socket di r
+            send_request_data(r);
+        }
+    }
     return 1;
 }
 
@@ -1729,7 +1937,7 @@ int manage_register_backup(char *msg){
     int ret=0;
     int loop_size;
     char aux[100];
-    printf("Il messaggio\n%s\n",msg);
+    printf("Il messaggio parziale di A:\n%s\n",msg);
     pthread_mutex_lock(&register_mutex);
     while(sscanf(msg+len,"%s",aux)==1){
         len += strlen(aux)+1;
@@ -1747,7 +1955,9 @@ int manage_register_backup(char *msg){
             &e->quantity)==4){
                 if(er==NULL){
                     printf("er è NULL\n");
-                    continue;
+                    //Costruisco un registro di cui non conoscevo l'esistenza e continuo
+                    er = init_closed_register(cd);
+                    registers_list_add(er);
                 }
                 ret = add_entry_in_register(er,e);
                 if(ret){//È stato effettivamento inserito ( non è un duplicato )
@@ -1794,12 +2004,12 @@ void update_neighbors(char* msg){
     int entries_number;
     sscanf(msg,"%s\n",aux);
     sscanf(aux,"%d,%d",&my_id,&entries_number);
-    printf("Il mio id = %d\n",my_id);
+    //printf("Il mio id = %d\n",my_id);
     index = strlen(aux)+1;
     for(int i = 0; i<entries_number;i++){
-        printf("msg:\n%s",msg+index);
+        //printf("msg:\n%s",msg+index);
         sscanf(msg+index,"%s\n",aux);
-        printf("Leggo riga %s\n",aux);
+        //printf("Leggo riga %s\n",aux);
         sscanf(aux,"%d,%u,%d",&id,&neig_addr.s_addr,&s_port);
         //-1 perché non conosciamo la socket
         add_neighbour(id,-1,neig_addr,s_port);
@@ -1951,6 +2161,7 @@ void serve_peer(int socket_served){
         ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo amichetto
         return;
     }
+
     //4 byte di opzioni e 4byte che indica la lunghezza del pacchetto
     options = first_packet>>32;
     len = first_packet & PACKET_MASK;
@@ -1975,24 +2186,25 @@ void serve_peer(int socket_served){
             break;
         case 'U'://Update
             printf("Ricevuto un messaggio di backup da %d\n",socket_served);
-            printf("Messaggio ricevuto\n %s\n",buffer);
+            printf("Messaggio ricevuto\n%s\n",buffer);
             manage_register_backup(buffer);
             printf("Lista aggiornata\n");
-            registers_list_print();
+            //registers_list_print();
             break;
         case 'R'://Request
             printf("Nuova Request da %d\n",socket_served);
-            printf("Messaggio ricevuto\n %s\n",buffer);
+            printf("Messaggio ricevuto\n%s\n",buffer);
             manage_new_request(buffer,socket_served);
+            requestes_list_print();
             break;
         case 'I'://Ignore
             printf("Ricevuto 'Ignora' da %d\n",socket_served);
-            printf("Messaggio ricevuto\n %s\n",buffer);
+            printf("Messaggio ricevuto\n%s\n",buffer);
             manage_ignore_answer(buffer,socket_served);
             break;
         case 'A'://Answer
             printf("Ricevuto una risposta da %d\n",socket_served);
-            printf("Messaggio ricevuto\n %s\n",buffer);
+            printf("Messaggio ricevuto\n%s\n",buffer);
             manage_request_answer(buffer,socket_served);
             break;
         case 'B'://bye bye
@@ -2000,8 +2212,9 @@ void serve_peer(int socket_served){
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
             break;
         default:
+            printf("Messaggio ricevuto\n%s\n",buffer);
             //Il messaggio non rispetta i protocolli di comunicazione, rimuovo il peer
-            printf("Il peer non rispetta i protocolli di comunicazione, lo elimino\n");
+            printf("Il peer non rispetta i protocolli di comunicazione\n");
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
             break;
@@ -2088,9 +2301,17 @@ printf("%c,%u",prova>>32,prova & mask);
     return 1;
 */
 
-
+    /*struct tm t;
+    time_t tt;
+    memset(&t,0,sizeof(struct tm));
+    t.tm_mday= 22;
+    t.tm_mon = 1-1;
+    t.tm_year = 2021-1900;
+    tt = mktime(&t);
+    printf("Mio compleannop %s",ctime(&tt));*/
 
 int main(int argc, char* argv[]){
+
     if(argc>1){
         my_port = atoi(argv[1]);
     }else{
