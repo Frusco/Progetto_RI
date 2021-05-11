@@ -87,9 +87,7 @@ struct timer_elem* timer_list_check_and_remove(int id){
     return ret;
 
 }
-/*
-Diminuisce di uno il time_to_live dell'elemento in testa a timer_list,
-*/
+
 int timer_list_head_time_experide(){
     int ret;
     pthread_mutex_lock(&timer_mutex);
@@ -100,6 +98,9 @@ int timer_list_head_time_experide(){
 }
 
 void remove_peer(int id);
+/*
+Diminuisce di uno il time_to_live dell'elemento in testa a timer_list,
+*/
 void timer_list_update(){
     pthread_mutex_lock(&timer_mutex);
     if(timer_list==NULL){
@@ -211,16 +212,24 @@ void sync_time_save(){
 time_t sync_time_load(){
     FILE *f;
     time_t t;
+    struct tm *tm_sync;
     int ret;
     f = fopen(SYNC_TIME_PATH,"r");
     pthread_mutex_lock(&sync_time_mutex);
     if(f){
         ret = fscanf(f,"%ld",&sync_time);
-        if(ret==0){
-            time(&sync_time);
+        if(ret==0){//File vuoto!
+           goto make_time; 
         }
     }else{
+make_time:
         time(&sync_time);
+        tm_sync = localtime(&sync_time);
+        tm_sync->tm_sec = 0;
+        tm_sync->tm_min = 0;
+        tm_sync->tm_hour = 0;
+        sync_time = mktime(tm_sync);
+        printf("Sync_time = %s",ctime(&sync_time));
     }
     t = sync_time;
     if(f)fclose(f);
@@ -878,6 +887,24 @@ void* thread_ds_loop(void* arg){
     pthread_exit(NULL);
 }
 
+void check_closing_hour(){
+    struct tm *tm_close;
+    time_t close;
+    time_t now;
+    time(&now);
+    close = sync_time_get();
+    tm_close = localtime(&close);
+    tm_close->tm_hour = END_REG_HOUR;
+    tm_close->tm_min = END_REG_MINUTES;
+    close = mktime(tm_close);
+    //printf("%s,%s\n",ctime(&now),ctime(&close));
+    if(now>=close){
+        printf("close = %s",ctime(&close));
+        printf("now is %s",ctime(&now));
+        sync_time_add_day();
+    }
+}
+
 /*
 Conta i secondi rimanenti al peer prima di essere eliminato,
 elimina i peer con time_to_live uguale a zero
@@ -890,6 +917,7 @@ void * thread_timer_loop(void* arg){
     while(loop_flag){
         sleep(1);
         timer_list_update();
+        check_closing_hour();
     }
     printf("[Timer_thread]: chiuso\n");
     return(NULL);

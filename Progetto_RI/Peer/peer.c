@@ -68,6 +68,28 @@ struct flooding_mate{
 
 };
 
+
+struct entry {
+    //Identifica la entry
+    struct timespec timestamp;
+    char type;
+    long quantity;
+    struct entry *next;
+};
+
+struct entries_register{
+    time_t creation_date;
+    FILE *f;
+    char *path;
+    int is_open;
+    unsigned int count;
+    struct entry* entries;
+    struct entries_register *next;
+    
+};
+
+struct entries_register *registers_list;
+
 struct request{
     //Insieme a timestamp identifica la richiesta
     int id;
@@ -217,6 +239,170 @@ struct request* requestes_list_get(time_t t,int id){
     return NULL;
 }
 
+void requestes_list_free(){
+    struct request *r;
+    struct flooding_mate *fm;
+    while(requestes_list){
+        r = requestes_list;
+        requestes_list = requestes_list->next;
+        while(r->flooding_list){
+            fm = r->flooding_list;
+            r->flooding_list = r->flooding_list->next;
+            free(fm);
+        }
+        free(r);
+    }
+}
+
+char* elab_totale(struct entry *e){
+    char *msg;
+    char aux[128];
+    struct entry *tot;
+    struct tm *start;
+    struct tm *end;
+    tot = malloc(sizeof(struct entry));
+    memset(tot,0,sizeof(struct entry));
+    tot->type = e->type;
+    start = localtime(&e->timestamp.tv_sec);
+    while(e){
+        tot->quantity += e->quantity;
+        if(!e->next){
+            end = localtime(&e->timestamp.tv_sec);
+        }
+        e = e->next;
+    }
+    sprintf(aux,"Totale dal %d:%d:%d al %d:%d:%d è %ld",
+    start->tm_year+1900,start->tm_mon+1,start->tm_mday,
+    end->tm_year+1900,end->tm_mon+1,end->tm_mday,
+    tot->quantity);
+    msg = malloc(sizeof(aux)+1);
+    strcpy(msg,aux);
+    free(tot);
+    return msg;
+}
+
+char* elab_variazione(struct entry *e){
+    char *msg;
+    char aux[1024];
+    struct entry *prev;
+    struct tm *start;
+    struct tm *end;
+    long index = 0;
+    prev = e;
+    
+    start = malloc(sizeof(struct tm));
+    end = malloc(sizeof(struct tm));
+    while(prev){
+        printf("%ld, quantity%ld\n",prev->timestamp.tv_sec,prev->quantity);
+        prev=prev->next;
+    }
+    prev = e;
+    e = e->next;
+    sprintf(aux,"Variazione (%c):\n",e->type);
+    while(e){
+        printf("Lavoro con %ld prev è %ld",e->timestamp.tv_sec,prev->timestamp.tv_sec);
+        index += strlen(aux);
+        //Faccio questa cosa  perché localtime restituisce sempre il puntatore al suo buffer
+        //che sovrascrive di volta in volta
+        memcpy(end,localtime(&e->timestamp.tv_sec),sizeof(struct tm));
+        memcpy(start,localtime(&prev->timestamp.tv_sec),sizeof(struct tm));
+        
+        sprintf(aux+index,"dal %d:%d:%d al %d:%d:%d è %ld\n",
+        start->tm_year+1900,start->tm_mon+1,start->tm_mday,
+        end->tm_year+1900,end->tm_mon+1,end->tm_mday,
+        (e->quantity-prev->quantity));
+        prev = e;
+        e = e->next;
+    }
+    msg = malloc(sizeof(aux)+1);
+    strcpy(msg,aux);
+    return msg;
+}
+
+struct entries_register* get_register_by_creation_date(time_t cd);
+char* get_elab_result_as_string(struct request *r){
+    char * msg;
+    struct entries_register *er;
+    struct entry *e,*list,*list_prev,*head;
+    er = get_register_by_creation_date(r->date_start);
+    if(er==NULL) er=registers_list;
+    list_prev = NULL;
+    head = NULL;
+    do{
+        list = malloc(sizeof(struct entry));
+        memset(list,0,sizeof(struct entry));
+        list->type = r->entry_type;
+        list->timestamp.tv_sec = er->creation_date;
+        printf("Lavoro con %ld\n",list->timestamp.tv_sec);
+        if(head == NULL){ 
+            printf("Head prende list\n");
+            head = list;
+        }
+        if(list_prev){
+            printf("list_prev->next prende list\n");
+            list_prev->next = list;
+        }else{
+            printf("list_prev prende head\n");
+            list_prev = list;
+        }
+        e = er->entries;
+        while(e){
+            if(e->type == list->type) list->quantity+=e->quantity;
+            e = e->next;
+        }
+        er = er->next;
+    }while(er->creation_date<=r->date_end);
+    e = head;
+    printf("Lista:\n");
+    while(e){
+        printf("%ld, quantity%ld\n",e->timestamp.tv_sec,e->quantity);
+        e=e->next;
+    }
+    switch(r->req_type){
+        case 'v':
+            msg = elab_variazione(head);
+        break;
+        case 't':
+            msg = elab_totale(head);
+        break;
+        default:
+        return NULL;
+    }
+
+    return msg;
+}
+
+/**
+ * @brief  Elabora la richiesta
+ * @note   
+ * @param  *r:request richiesta da elaborare 
+ * @retval path del file elaborato
+ */
+char* elab_request(struct request *r){
+    FILE *f;
+    char* path;
+    char* result;
+    char file_name[128];
+    if(r==NULL)return NULL;
+    //Variazione con un giorno solo?
+    if(r->req_type=='v' && r->date_start==r->date_end)return NULL;
+    //Controllo che tutti i peer coinvolti abbiano risposto
+    if(!flooding_list_all_checked(r->flooding_list))return NULL;
+    //Genero il path per il file
+    sprintf(file_name,"/%c%c-%ld_%ld.res",r->req_type,r->entry_type,r->date_start,r->date_end);
+    path = malloc(sizeof(my_path)+sizeof(file_name)+1);
+    strcpy(path,my_path);
+    strcat(path,file_name);
+    printf("Path: %s\n",path);
+    f = fopen(path,"w");
+    result = get_elab_result_as_string(r);
+    printf("Risultato:\n%s\n",result);
+    fprintf(f,"%s",result);
+    fclose(f);
+    free(result);
+    return path;
+}
+
 void requestes_list_print(){
     struct request *cur;
     cur = requestes_list;
@@ -228,7 +414,7 @@ void requestes_list_print(){
 }
 
 /**
- * @brief  Genera una Request di elebaorazione e la inserisce nella requests_list
+ * @brief  Genera una Request di elebaorazione
  * @note   
  * @param  type:char il tipo di entry ( tampone o nuovi casi )
  * @param  req_type:char tipo di richiesta ( totale o variazione )
@@ -258,30 +444,9 @@ struct request* init_request(char type,char req_type,time_t *ds,time_t *de,int *
     req->entry_type = type;
     req->req_type = req_type;
     req->id = (id==NULL)?my_id:*id;
-    requestes_list_add(req);
     return req;
 }
 
-struct entry {
-    //Identifica la entry
-    struct timespec timestamp;
-    char type;
-    long quantity;
-    struct entry *next;
-};
-
-struct entries_register{
-    time_t creation_date;
-    FILE *f;
-    char *path;
-    int is_open;
-    unsigned int count;
-    struct entry* entries;
-    struct entries_register *next;
-    
-};
-
-struct entries_register *registers_list;
 
 /**
  * @brief  Compara due entry
@@ -361,12 +526,15 @@ struct entries_register* get_open_register(){
     return NULL;
 }
 
-
+void registers_list_print();
 struct entries_register* get_last_closed_register(){
     struct entries_register* cur;
     struct entries_register* prev;
     cur = registers_list;
     prev = NULL;
+    printf("Prima di print\n");
+    registers_list_print();
+    printf("prima del while\n");
     while(cur){
         printf("Cur è %d",cur->is_open);
         if(cur->is_open){ return prev;}
@@ -376,7 +544,7 @@ struct entries_register* get_last_closed_register(){
         }
     }
     // Nessun registro aperto!
-    return NULL;
+    return prev;
 }
 
 /**
@@ -470,9 +638,9 @@ void registers_list_print(){
     cur = registers_list;
     while(cur){
         e_cur = cur->entries;
-        printf("register: %s",ctime(&cur->creation_date));
+        printf("register: is_open = %d date: %s",cur->is_open,ctime(&cur->creation_date));
         while(e_cur){
-            printf("entry: %s|->type:%c quantity: %ld\n",ctime(&e_cur->timestamp.tv_sec),e_cur->type,e_cur->quantity);  
+            printf("\tentry: type:%c quantity: %ld date: %s",e_cur->type,e_cur->quantity,ctime(&e_cur->timestamp.tv_sec));  
             e_cur = e_cur->next;
         }
         cur = cur->next;
@@ -767,6 +935,7 @@ close_loop:
     er = open_today_register();
     //Mi sincronizzo con gli altri peer
     if(current_open_date > er->creation_date) goto close_loop;
+    registers_list_print();
     pthread_mutex_unlock(&register_mutex);
 }
 
@@ -1039,6 +1208,8 @@ void globals_init(){
  * @retval None
  */
 void globals_free(){
+    requestes_list_free();
+    registers_list_free();
     neighbors_list_free();
 }
 /*
@@ -1076,6 +1247,7 @@ int check_date_format(char *dates){
 }
 
 struct request* add_new_request(char rt, char t, char* dates){
+    struct request *r;
     time_t *start,*end;
     struct entries_register *last_closed_reg;
     struct tm s,e;
@@ -1096,12 +1268,15 @@ struct request* add_new_request(char rt, char t, char* dates){
         printf("Non esiste ancora un registro chiuso!\n");
         return NULL;
     }
+    end = malloc(sizeof(time_t));
+    *end = last_closed_reg->creation_date;
     memset(&s,0,sizeof(struct tm));
     memset(&e,0,sizeof(struct tm));
+    printf("Prima dello switch");
+    
     switch(check_date_format(dates)){
         case 0://start ed end presenti
             start = malloc(sizeof(time_t));
-            end = malloc(sizeof(time_t));
             if(sscanf(dates,"%d:%d:%d-%d:%d:%d",
             &s.tm_mday,
             &s.tm_mon,
@@ -1125,7 +1300,7 @@ struct request* add_new_request(char rt, char t, char* dates){
         break;
         case 1://solo start presente
         start = malloc(sizeof(time_t));
-        end = malloc(sizeof(time_t));
+        
         if(sscanf(dates,"%d:%d:%d-*",
             &s.tm_mday,
             &s.tm_mon,
@@ -1136,11 +1311,10 @@ struct request* add_new_request(char rt, char t, char* dates){
             s.tm_mon -=1;
             s.tm_yday -=1900;
             *start = mktime(&s);
-            *end = last_closed_reg->creation_date;
+            
             
         break;
         case 2://solo end presente
-            end = malloc(sizeof(time_t));
             if(sscanf(dates,"*-%d:%d:%d",
                 &e.tm_mday,
                 &e.tm_mon,
@@ -1159,7 +1333,9 @@ struct request* add_new_request(char rt, char t, char* dates){
         *end = last_closed_reg->creation_date;
     }
     
-    return init_request(t,rt,start,end,NULL,NULL);
+    r = init_request(t,rt,start,end,NULL,NULL);
+    requestes_list_add(r);
+    return r;
 }
 
 
@@ -1283,7 +1459,6 @@ void user_loop(){
                 printf("Chiusura in corso...\n");
                 printf("Invio il backup a tutti\n");
                 send_backups_to_all();
-                sleep(1);
                 printf("Imposto l'uscita a udp e attendo\n");
                 ds_option_set('b');
                 pthread_join(ds_comunication_thread,&ret);
@@ -1351,6 +1526,7 @@ void user_loop(){
 unsigned int generate_greeting_message(char** msg){
     char buffer[255];
     unsigned int len;
+    printf("Il mio ID è %d\n",my_id);
     sprintf(buffer,"%d,%u,%d",my_id,my_addr.s_addr,my_port);
     len = sizeof(char)*strlen(buffer)+1;
     *msg = malloc(len);
@@ -1611,7 +1787,7 @@ void send_backups_to_all(){
             continue;
         }
         printf("Inviato il primo messaggio\n");
-        if(send(n->socket,(void*)msg,len+1,0)<0){//+1 per carattere terminatore
+        if(send(n->socket,(void*)msg,len,0)<0){//+1 per carattere terminatore
             perror("Errore in fase di invio");
             n=n->next;
             continue;
@@ -1804,8 +1980,7 @@ int manage_request_answer(char *buffer,int socket){
     manage_register_backup(buffer+index);
     if(flooding_list_all_checked(r->flooding_list)){
         if(r->ret_socket==-1){//Sono io che ho iniziato la richiesta
-            //TO DO
-            printf("FATTO!\n");
+            printf("Risultato salvato in : %s\n",elab_request(r));
         }else{//Invio il risultato alla ret_socket di r
             send_request_data(r);
         }
@@ -1872,6 +2047,7 @@ int manage_new_request(char *buffer,int socket){
     }
     //Una nuova richiesta!
     r = init_request(t,rt,&s,&e,&socket,&id);
+    requestes_list_add(r);
     if(r->flooding_list==NULL){
     //Non devo inoltrare la richiesta a nessuno
     //Quindi ripondo subito
