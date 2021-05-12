@@ -189,9 +189,9 @@ int flooding_list_all_checked(struct flooding_mate *fm){
  */
 int flooding_list_check_flooding_mate(struct flooding_mate *fm,int id,int socket){
     while(fm){
-        printf("Provo con  fmid=%d, fmso=%d confronto con id:%d socket:%d -> %d&&%d = %d",fm->id,fm->socket,id,socket,fm->socket==socket,fm->id==id,fm->socket==socket && fm->id==id);
+        printf("Provo con  fmid=%d, fmso=%d\nConfronto con id:%d socket:%d\n%d&&%d = %d\n",fm->id,fm->socket,id,socket,fm->socket==socket,fm->id==id,fm->socket==socket && fm->id==id);
         if(fm->socket==socket && fm->id==id){
-            printf("Beccato il vicino id=%d, so=%d",fm->id,fm->socket);
+            printf("Beccato il vicino id=%d, so=%d\n",fm->id,fm->socket);
             fm->recieved_flag = 1;
             return 1;
         }
@@ -202,9 +202,9 @@ int flooding_list_check_flooding_mate(struct flooding_mate *fm,int id,int socket
 }
 
 void flooding_list_print(struct flooding_mate* fm){
-    printf("Flooding list:\n");
+    printf("#########Flooding list:\n");
     while(fm){
-        printf("[id:%d,socket:%d,flag:%d]",fm->id,fm->socket,fm->recieved_flag);
+        printf("\t[id:%d,socket:%d,flag:%d]\n",fm->id,fm->socket,fm->recieved_flag);
         fm = fm->next;
     }
     printf("\n");
@@ -280,7 +280,7 @@ char* elab_totale(struct entry *e){
     free(tot);
     return msg;
 }
-
+void registers_list_print();
 char* elab_variazione(struct entry *e){
     char *msg;
     char aux[1024];
@@ -289,7 +289,8 @@ char* elab_variazione(struct entry *e){
     struct tm *end;
     long index = 0;
     prev = e;
-    
+    registers_list_print();
+    printf("Dentro elab V!\n");
     start = malloc(sizeof(struct tm));
     end = malloc(sizeof(struct tm));
     while(prev){
@@ -440,7 +441,6 @@ struct request* init_request(char type,char req_type,time_t *ds,time_t *de,int *
     req->ret_socket = (socket==NULL)?-1:*socket;//Se NULL sono io che faccio la richiesta
     req->flooding_list = init_flooding_list(req->ret_socket);
     req->next = NULL;
-    req->ret_socket = (socket==NULL)?-1:*socket;//Se NULL sono io che faccio la richiesta
     req->entry_type = type;
     req->req_type = req_type;
     req->id = (id==NULL)?my_id:*id;
@@ -1054,12 +1054,16 @@ int update_register_by_remote_string(char* buffer){
 struct neighbour* get_neighbour_by_socket(int socket){
     struct neighbour*cur;
     cur = neighbors_list;
+    printf("\tGET N by SOCKET = %d\n",socket);
     while(cur){
+        printf("\tChecking id= %d socket = %d\n",cur->id,cur->socket);
         if(cur->socket == socket){
+            printf("\t\tMATCH!\n");
             return cur;
         }
         cur = cur->next;
     }
+    printf("No match :(\n");
     return NULL;
 }
 
@@ -1261,9 +1265,7 @@ struct request* add_new_request(char rt, char t, char* dates){
         printf("Tipo entry errata\n");
         return NULL;
     }
-    printf("prima del get\n");
     last_closed_reg = get_last_closed_register();
-    printf("dopo del get\n");
     if(last_closed_reg==NULL){
         printf("Non esiste ancora un registro chiuso!\n");
         return NULL;
@@ -1272,8 +1274,6 @@ struct request* add_new_request(char rt, char t, char* dates){
     *end = last_closed_reg->creation_date;
     memset(&s,0,sizeof(struct tm));
     memset(&e,0,sizeof(struct tm));
-    printf("Prima dello switch");
-    
     switch(check_date_format(dates)){
         case 0://start ed end presenti
             start = malloc(sizeof(time_t));
@@ -1338,8 +1338,20 @@ struct request* add_new_request(char rt, char t, char* dates){
     return r;
 }
 
-
-
+/**
+ * @brief  Inserisce 10 entry di prova nel registro aperto
+ * @note   
+ * @retval None
+ */
+void test_add_entry(){
+    printf("TEST_ENTRIES\n");
+    int rand_quantity;
+    srand(time(NULL));
+    for(int i =0 ; i<10 ;i++){
+        rand_quantity = rand() % 100 + 1;
+        create_entry((rand_quantity%2==0)?'n':'t',rand_quantity);
+    }
+}
 
 /*
 //Sveglio il thread in ascolto per farlo uscire dal loop
@@ -1409,6 +1421,7 @@ void user_loop(){
                 }
                 registers_list_print();
                 sleep(1);
+                test_add_entry();
                 break;
             //__add__
             case 2:
@@ -1429,7 +1442,6 @@ void user_loop(){
                 }else{
                     printf("Aggiungere %ld nuovi positivi?<y/n>\n>> ",quantity);
                 }
-                
                 scanf("%c",&confirm);
                 //Rimuovo lo /n lasciata dalla scanf
                 while((getchar()) != '\n'); 
@@ -1786,7 +1798,6 @@ void send_backups_to_all(){
             n=n->next;
             continue;
         }
-        printf("Inviato il primo messaggio\n");
         if(send(n->socket,(void*)msg,len,0)<0){//+1 per carattere terminatore
             perror("Errore in fase di invio");
             n=n->next;
@@ -1869,7 +1880,6 @@ void send_request_to_all(struct request *r,int *avoid_socket){
             n=n->next;
             continue;
         }
-        printf("Inviato il primo messaggio di request\n");
         if(send(n->socket,(void*)msg,len,0)<0){//+1 per carattere terminatore
             perror("Errore in fase di invio");
             n=n->next;
@@ -1957,16 +1967,18 @@ int manage_request_answer(char *buffer,int socket){
     char aux[128];
     sscanf(buffer,"%s",aux);
     index+=strlen(aux)+1;
-    printf("La prima riga di A è %s",aux);
     sscanf(aux,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt);
+    printf("Request\n%s\n",buffer);
     r = requestes_list_get(tp,id);
     if(r==NULL){//Non dovrebbe accadere, ma la gestiamo
         printf("Risposta di una richiesta inesistente\n");
         return 0;
     }
-    printf("Prima di get neighbour by socket\n");
     n = get_neighbour_by_socket(socket);
-    printf("Controllo la flooding list\n");
+    if(n==NULL){
+        printf("Nessun vicino corrisponde alla socket passata!\n");
+        return 0;
+    }
     printf("Socket che sto servendo: %d, nid=%d ns=%d\n",socket,n->id,n->socket);
     flooding_list_print(r->flooding_list);
     if(!flooding_list_check_flooding_mate(r->flooding_list,n->id,socket)){
@@ -1976,7 +1988,7 @@ int manage_request_answer(char *buffer,int socket){
         */
         return 0;
     }
-    printf("Passo a manage_register_backup con\n %s\n",buffer+index);
+    //printf("Passo a manage_register_backup con\n %s\n",buffer+index);
     manage_register_backup(buffer+index);
     if(flooding_list_all_checked(r->flooding_list)){
         if(r->ret_socket==-1){//Sono io che ho iniziato la richiesta
@@ -2013,7 +2025,6 @@ int send_ignore_my_answer(char *msg,int socket){
             perror("Errore in fase di invio");
             return 0;
         }
-    printf("Inviato il primo messaggio\n");
     if(send(socket,(void*)msg,len,0)<0){//+1 per carattere terminatore
         perror("Errore in fase di invio");
         return 0;
@@ -2034,6 +2045,7 @@ int manage_new_request(char *buffer,int socket){
     char t,rt;//type,req_type
     time_t s,e,tp;//start,end,timestamp  
     sscanf(buffer,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt);
+    printf("Request\n%s\n",buffer);
     r = requestes_list_get(tp,id);
     if(r){
         printf("Richiesta già presente, gestisco il loop\n");
@@ -2068,6 +2080,7 @@ int manage_ignore_answer(char* buffer, int socket){
     struct request *r;
     int id;
     char t,rt;//type req_type
+    struct neighbour *n;
     time_t s,e,tp;//start,end,timestamp  
     sscanf(buffer,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt);
     r = requestes_list_get(tp,id);
@@ -2076,12 +2089,17 @@ int manage_ignore_answer(char* buffer, int socket){
         * di ignorare una risposta a una richiesta che non possiedo*/
        return 0;
     }
+    n = get_neighbour_by_socket(socket);
+    if(n==NULL){
+        printf("Nessun vicino corrisponde alla socket passata!\n");
+        return 0;
+    }
     //Lo flaggo e ignoro
-    flooding_list_check_flooding_mate(r->flooding_list,id,socket);
+    flooding_list_check_flooding_mate(r->flooding_list,n->id,socket);
     if(flooding_list_all_checked(r->flooding_list)){
         if(r->ret_socket==-1){//Sono io che ho iniziato la richiesta
             //TO DO
-            printf("FATTO!\n");
+            printf("Risultato salvato in : %s\n",elab_request(r));
         }else{//Invio il risultato alla ret_socket di r
             send_request_data(r);
         }
@@ -2304,6 +2322,7 @@ void* ds_comunication_loop(void *arg){
                 if(time_recived > get_current_open_date()){//dobbiamo sincronizzarci
                     set_current_open_date(time_recived);
                     close_today_register();
+                    test_add_entry();
                 }
             }
         }
@@ -2359,6 +2378,7 @@ void serve_peer(int socket_served){
             sscanf(buffer,"%d,%u,%d",&peer_id,&peer_addr.s_addr,&peer_port);
             //printf("Quello che ho letto %d,%u,%d\n",peer_id,peer_addr.s_addr,peer_port);
             add_neighbour(peer_id,socket_served,peer_addr,peer_port);
+            neighbors_list_print();
             break;
         case 'U'://Update
             printf("Ricevuto un messaggio di backup da %d\n",socket_served);
@@ -2386,6 +2406,7 @@ void serve_peer(int socket_served){
         case 'B'://bye bye
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
+            neighbors_list_print();
             break;
         default:
             printf("Messaggio ricevuto\n%s\n",buffer);
@@ -2393,6 +2414,7 @@ void serve_peer(int socket_served){
             printf("Il peer non rispetta i protocolli di comunicazione\n");
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
+            neighbors_list_print();
             break;
     }
     
