@@ -149,14 +149,21 @@ int cur_FILE_request_set(struct request* r){
  */
 void cur_FILE_request_free(){
     struct flooding_mate *aux;
-    free(cur_FILE_request->file_name);
+    printf("Dentro alla FILE free\n");
+    if(cur_FILE_request==NULL)return;
+    if(cur_FILE_request->file_name!=NULL){
+        free(cur_FILE_request->file_name);
+    }
+    
     while(cur_FILE_request->fm){
+        printf("Dentro al loop\n");
         aux = cur_FILE_request->fm;
         cur_FILE_request->fm = cur_FILE_request->fm->next;
         free(aux);
     }
     free(cur_FILE_request);
     cur_FILE_request = NULL;
+    printf("Liberata cur_FILE_request\n");
 }
 
 void send_FILE_request(){
@@ -170,7 +177,7 @@ void send_FILE_request(){
         return;
     }
     char operation = 'r';//r:FILE request
-    len = strlen(cur_FILE_request->file_name);
+    len = strlen(cur_FILE_request->file_name)+1;
     //printf("filename=%s len=%u",cur_FILE_request->file_name,len);
     len = htonl(len);
     operations = (unsigned int)operation;
@@ -203,7 +210,7 @@ void send_FILE_answer(char* msg,int socket_served){
     uint32_t len; // lunghezza messaggio
     uint32_t operations=0;
     char operation = (msg==NULL)?'N':'F';//N:not found F:File
-    len = (msg==NULL)?0:htonl(strlen(msg));
+    len = (msg==NULL)?0:htonl(strlen(msg)+1);
     operations = (unsigned int)operation;
     operations = htonl(operations);
     first_packet = operations;
@@ -238,6 +245,7 @@ void manage_FILE_request(char *buffer,int socket_served){
     printf("file da cercare:%s\n",path);
     f = fopen(path,"r");
     if(!f){
+        printf("File NON trovato!\n");
         send_FILE_answer(NULL,socket_served);
         return;
     }
@@ -247,10 +255,15 @@ void manage_FILE_request(char *buffer,int socket_served){
     fseek(f, 0L, SEEK_SET);
     msg = malloc(size);
     if(size==0){
+        printf("Trovato il file, ma è vuoto!\n");
         send_FILE_answer(NULL,socket_served);
         return;
     }
     fread((void*)(msg),sizeof(char),size,f);
+    msg[size]='\0';
+    printf("Messaggio %s\nCBC\n",msg);
+    for(int i = 0; i<size;i++)printf("%c",msg[i]);
+    printf("Trovato il file! Rispondo\n");
     send_FILE_answer(msg,socket_served);
 }
 int flooding_list_all_checked(struct flooding_mate *fm);
@@ -278,11 +291,13 @@ void manage_FILE_found(char* buffer,int socket_served){
     path = malloc(sizeof(my_path)+sizeof(cur_FILE_request->file_name)+1);
     strcpy(path,my_path);
     strcat(path,cur_FILE_request->file_name);
-    printf("lunghezza buffer = %ld",strlen(buffer));
+    printf("lunghezza buffer = %ld\n",strlen(buffer));
     printf("Elaborato salvato in: %s\n",path);
     f = fopen(path,"w");
-    printf("Risultato:\n%s\n",buffer);
+    //fwrite((void*)buffer,1,strlen(buffer)+1,f);
     fprintf(f,"%s",buffer);
+    printf("Risultato:\n%s\n",buffer);
+    
     fclose(f);
     cur_FILE_request_free();
 }
@@ -1337,8 +1352,8 @@ struct sockaddr ds_addr;
 void generate_work_folders(){
     char path[50];
     int result;
-    sprintf(path,"./%d",my_port);
-    printf("%s\n",path);
+    sprintf(path,"./__%d",my_port);
+    //printf("%s\n",path);
     result = mkdir(path, 0777);
     my_path = malloc(sizeof(char)*(strlen(path)+1));
     strcpy(my_path,path);
@@ -1726,6 +1741,9 @@ void user_loop(){
                 printf("Socket chiusa\n");
                 
             break;
+            case 5://showpeers
+                neighbors_list_print();
+            break;
             //__comando non riconosciuto__
             default:
                 printf("Comando non riconosciuto!\n");
@@ -1860,7 +1878,7 @@ int generate_entries_list_msg(struct entries_register *er,char **msg){
     }
     fread((void*)(*msg+strlen(name)),sizeof(char),size,er->f);
     (*msg)[size+strlen(name)]='\0';
-    printf("\nStampo come stringa\n%s\n",*msg);
+    //printf("\nStampo come stringa\n%s\n",*msg);
     fclose(er->f);
     return strlen(*msg);
 }
@@ -1955,10 +1973,10 @@ char* generate_backup_message(time_t *s,time_t *e){
             continue;
         }
         if(er->creation_date>end)break;//Abbiamo superato la data di fine
-        printf("Prima di stampare il nome\n");
-        printf("%ld,%u\npath:%s\n",er->creation_date,er->count,er->path);
+       // printf("Prima di stampare il nome\n");
+       // printf("%ld,%u\npath:%s\n",er->creation_date,er->count,er->path);
         sprintf(name,"%ld,%u\n",er->creation_date,er->count);
-        printf("Prima di aprire il file\n");
+       // printf("Prima di aprire il file\n");
         er->f=fopen(er->path,"r");
         if(er->f==NULL){
             printf("file non presente, continuo\n");
@@ -1980,21 +1998,21 @@ char* generate_backup_message(time_t *s,time_t *e){
         fread((void*)(msg+strlen(name)),sizeof(char),size,er->f);
         msg[size+strlen(name)]='\0';
         if(tot_msg == NULL){
-            printf("Faccio la malloc\n");
+            //printf("Faccio la malloc\n");
             tot_msg = malloc(strlen(msg)+1);
-            printf("Faccio la strcpy\n");
+            //printf("Faccio la strcpy\n");
             strcpy(tot_msg,msg);
             
         }else{
-            printf("Faccio realloc\n");
+            //printf("Faccio realloc\n");
             tot_msg = realloc(tot_msg,(strlen(tot_msg)+strlen(msg)+1));
             //tot_msg[strlen(tot_msg)] = '\n';
-            printf("Faccio la cat\n");
+            //printf("Faccio la cat\n");
             strncat(tot_msg,msg,strlen(msg));
         }
-        printf("Prima di chiudere il file\n");
+        //printf("Prima di chiudere il file\n");
         fclose(er->f);
-        printf("Messaggio parziale %s",tot_msg);
+        //printf("Messaggio parziale %s",tot_msg);
         er = er->next;
         
     }
@@ -2026,7 +2044,7 @@ void send_backups_to_all(){
         goto end_send_to_all;
         return;
     }
-    len = strlen(msg);
+    len = strlen(msg)+1;
     len = htonl(len);
     operations = (unsigned int)operation;
     operations = htonl(operations);
@@ -2034,7 +2052,7 @@ void send_backups_to_all(){
     first_packet = first_packet<<32 | len;
     len = ntohl(len);
     while(n){
-        printf("Generato il messaggio di lunghezza %dl\n messaggio:\n%s\n",len,msg);
+        //printf("Generato il messaggio di lunghezza %dl\n messaggio:\n%s\n",len,msg);
     //Mando il primo pacchetto con l'operazione richiesta
     //e la lunghezza del secondo pacchetto  
         if(send(n->socket,(void*)&first_packet,sizeof(first_packet),0)<0){
@@ -2065,9 +2083,12 @@ end_send_to_all:
 char* generate_request_message(struct request *r){
     char* msg;
     char aux[128];
+    long len;
     if(r==NULL)return NULL;
     sprintf(aux,"%d,%ld,%ld,%ld,%c,%c\n",r->id,r->timestamp,r->date_start,r->date_end,r->entry_type,r->req_type);
-    msg = malloc(strlen(aux));
+    len = strlen(aux);
+    if(len==0)return NULL;
+    msg = malloc(len);
     strcpy(msg,aux);
     return msg;
 }
@@ -2102,7 +2123,7 @@ void send_request_to_all(struct request *r,int *avoid_socket){
         goto end_req_to_all;
         return;
     }
-    len = strlen(msg);
+    len = strlen(msg)+1;
     len = htonl(len);
     operations = (unsigned int)operation;
     operations = htonl(operations);
@@ -2193,11 +2214,11 @@ void send_request_data(struct request *r){
         return;
     }
     msg =malloc(strlen(backup)+strlen(req_header)+1);
-    printf("BACKUP:\n%s\nHEADER:%s\n",backup,req_header);
+    //printf("BACKUP:\n%s\nHEADER:%s\n",backup,req_header);
     strcpy(msg,req_header);
-    printf("MSG_parziale:%s",msg);
+    //printf("MSG_parziale:%s",msg);
     strcat(msg,backup);
-    printf("MSG_completato:%s",msg);
+    //printf("MSG_completato:%s",msg);
     len = strlen(msg)+1;
     //for(int i=0;i<len;i++)printf("%c",msg[i]);
     len = htonl(len);
@@ -2206,7 +2227,7 @@ void send_request_data(struct request *r){
     first_packet = operations;
     first_packet = first_packet<<32 | len;
     len = ntohl(len);
-    printf("Request DATA:\n -lunghezza %u\n -messaggio:\n%s\n",len,msg);
+    //printf("Request DATA:\n -lunghezza %u\n -messaggio:\n%s\n",len,msg);
     //Mando il primo pacchetto con l'operazione richiesta
     //e la lunghezza del secondo pacchetto  
         if(send(r->ret_socket,(void*)&first_packet,sizeof(first_packet),0)<0){
@@ -2227,6 +2248,7 @@ req_end:
 
 void check_all_registers_as_completed(struct request *r){
     struct entries_register *er;
+    if(registers_list == NULL) return;
     er = registers_list;
     char *old_path;
     int position;
@@ -2267,7 +2289,7 @@ int manage_request_answer(char *buffer,int socket){
     sscanf(buffer,"%s",aux);
     index+=strlen(aux)+1;
     sscanf(aux,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt);
-    printf("Request\n%s\n",buffer);
+    //printf("Request\n%s\n",buffer);
     r = requestes_list_get(tp,id);
     if(r==NULL){//Non dovrebbe accadere, ma la gestiamo
         printf("Risposta di una richiesta inesistente\n");
@@ -2278,7 +2300,7 @@ int manage_request_answer(char *buffer,int socket){
         printf("Nessun vicino corrisponde alla socket passata!\n");
         return 0;
     }
-    printf("Socket che sto servendo: %d, nid=%d ns=%d\n",socket,n->id,n->socket);
+    //printf("Socket che sto servendo: %d, nid=%d ns=%d\n",socket,n->id,n->socket);
     //flooding_list_print(r->flooding_list);
     if(!flooding_list_check_flooding_mate(r->flooding_list,n->id,socket)){
         printf("Il vicino %d non è in lista!\n",n->id);
@@ -2313,7 +2335,7 @@ int send_ignore_my_answer(char *msg,int socket){
     uint32_t len; // lunghezza messaggio
     uint32_t operations=0;
     char operation = 'I';//Ignore!
-    len = strlen(msg);
+    len = strlen(msg)+1;
     len = htonl(len);
     operations = (unsigned int)operation;
     operations = htonl(operations);
@@ -2345,7 +2367,7 @@ int manage_new_request(char *buffer,int socket){
     char t,rt;//type,req_type
     time_t s,e,tp;//start,end,timestamp  
     sscanf(buffer,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt);
-    printf("Request\n%s\n",buffer);
+    //printf("Request\n%s\n",buffer);
     r = requestes_list_get(tp,id);
     if(r){
         printf("Richiesta già presente, gestisco il loop\n");
@@ -2432,7 +2454,7 @@ int manage_register_backup(char *msg){
     int ret=0;
     int loop_size;
     char aux[100];
-    printf("Il messaggio parziale di A:\n%s\n",msg);
+    //printf("Il messaggio parziale di A:\n%s\n",msg);
     pthread_mutex_lock(&register_mutex);
     while(sscanf(msg+len,"%s",aux)==1){
         len += strlen(aux)+1;
@@ -2442,7 +2464,7 @@ int manage_register_backup(char *msg){
             sscanf(msg+len,"%s",aux);
             len+=strlen(aux)+1;
             e = malloc(sizeof(struct entry));
-            printf("Leggo riga %s\n",aux);
+            ///printf("Leggo riga %s\n",aux);
             if(sscanf(aux,"%ld.%ld:%c,%ld",
             &e->timestamp.tv_sec,
             &e->timestamp.tv_nsec,
@@ -2616,14 +2638,17 @@ void* ds_comunication_loop(void *arg){
                 update_neighbors(buffer);
                 ds_option_set('r');//Il loop passa in modalità sincronizzazione ( refresh )
             }else if(option == 'r'){
-                printf("Ricevuto \n%s\n",buffer);
-                printf("Subito dopo ricevuto\n%ld",time_recived);
+                //printf("Ricevuto \n%s\n",buffer);
+                //printf("Subito dopo ricevuto\n%ld",time_recived);
+                printf("Registro di oggi chiuso.\n");
                 sscanf(buffer,"%ld\n",&time_recived);
-                printf("Il mio tempo:%ld , ricevuto:%ld ",get_current_open_date(),time_recived);
+                //printf("Il mio tempo:%ld , ricevuto:%ld ",get_current_open_date(),time_recived);
                 if(time_recived > get_current_open_date()){//dobbiamo sincronizzarci
                     set_current_open_date(time_recived);
                     close_today_register();
-                    test_add_entry();
+                    printf("Aperto nuovo registro\n");
+                    test_add_entry();   
+
                 }
             }
         }
@@ -2668,6 +2693,7 @@ void serve_peer(int socket_served){
     //printf("operation %c\n",operation);
     printf("Giunta operazione %c con lungezza %d\n",operation,len);
     if(len>0){
+        printf("Prima della malloc del buffer con len = %d\n",len);
         buffer = malloc(sizeof(char)*len);
             if(recv(socket_served,(void*)buffer,len,0)<0){
                 perror("Errore in fase di ricezione\n");
@@ -2692,7 +2718,7 @@ void serve_peer(int socket_served){
             printf("Nuova Request da %d\n",socket_served);
             printf("Messaggio ricevuto\n%s\n",buffer);
             manage_new_request(buffer,socket_served);
-            requestes_list_print();
+            //requestes_list_print();
             break;
         case 'r'://File Request
             printf("Richiesta file da %d\n",socket_served);
@@ -2710,7 +2736,7 @@ void serve_peer(int socket_served){
             break;
         case 'A'://Answer
             printf("Ricevuto una risposta da %d\n",socket_served);
-            printf("Messaggio ricevuto\n%s\n",buffer);
+            //printf("Messaggio ricevuto\n%s\n",buffer);
             manage_request_answer(buffer,socket_served);
             break;
         case 'F'://File Found
@@ -2850,3 +2876,4 @@ int main(int argc, char* argv[]){
     globals_free();
     printf("Ciao, ciao!\n");
 }
+    //strcpy(path,my_path);
