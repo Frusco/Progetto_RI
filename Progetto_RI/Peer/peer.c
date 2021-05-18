@@ -137,7 +137,7 @@ int cur_FILE_request_set(struct request* r){
     cur_FILE_request = malloc(sizeof(struct FILE_request));
     cur_FILE_request->r = r;
     sprintf(aux,"/%c%c-%ld_%ld.res",r->req_type,r->entry_type,r->date_start,r->date_end);
-    cur_FILE_request->file_name = malloc(sizeof(aux)+1);
+    cur_FILE_request->file_name = malloc(strlen(aux)+1);
     strcpy(cur_FILE_request->file_name,aux);
     cur_FILE_request->fm = init_flooding_list(-1);
     return 1;
@@ -243,7 +243,7 @@ void manage_FILE_request(char *buffer,int socket_served){
     strcpy(path,my_path);
     strcat(path,buffer);
     printf("file da cercare:%s\n",path);
-    f = fopen(path,"r");
+    f = fopen(path,"rb");
     if(!f){
         printf("File NON trovato!\n");
         send_FILE_answer(NULL,socket_served);
@@ -261,6 +261,7 @@ void manage_FILE_request(char *buffer,int socket_served){
     }
     fread((void*)(msg),sizeof(char),size,f);
     msg[size]='\0';
+    fclose(f);
     printf("Messaggio %s\nCBC\n",msg);
     for(int i = 0; i<size;i++)printf("%c",msg[i]);
     printf("Trovato il file! Rispondo\n");
@@ -286,19 +287,32 @@ void manage_FILE_found(char* buffer,int socket_served){
     struct neighbour *n;
     char* path;
     FILE *f;
+    
+    
     n = get_neighbour_by_socket(socket_served);
     printf("Il vicino id:%d socket:%d ha il file che cerchi\n",n->id,n->socket);
-    path = malloc(sizeof(my_path)+sizeof(cur_FILE_request->file_name)+1);
+    path = malloc(strlen(my_path)+strlen(cur_FILE_request->file_name)+1);//+1
+    printf("my_path = %s len %ld\n",my_path,strlen(my_path));
+    printf("file_name = %s len %ld\n",cur_FILE_request->file_name,strlen(cur_FILE_request->file_name));
     strcpy(path,my_path);
     strcat(path,cur_FILE_request->file_name);
+    printf("Path = %s len %ld\n",path,sizeof(path));
     printf("lunghezza buffer = %ld\n",strlen(buffer));
     printf("Elaborato salvato in: %s\n",path);
-    f = fopen(path,"w");
-    //fwrite((void*)buffer,1,strlen(buffer)+1,f);
-    fprintf(f,"%s",buffer);
-    printf("Risultato:\n%s\n",buffer);
+    printf("File_name = %s",cur_FILE_request->file_name+1);
+    f = fopen(path,"wb");
+    if(f==NULL){
+        printf("Errore nella fopen con path= %s",path);
+        return;
+    }
     
+    fwrite((void*)buffer,strlen(buffer),1,f);
+    //fwrite((void*)buffer,strlen(buffer)-1,1,f);
+    
+    for(int i = 0;i<strlen(path)+1;i++)printf("%c",path[i]);
+    printf("\nRisultato:\n%s\n",buffer);
     fclose(f);
+    free(path);
     cur_FILE_request_free();
 }
 
@@ -472,7 +486,7 @@ char* elab_totale(struct entry *e){
     start->tm_year+1900,start->tm_mon+1,start->tm_mday,
     end->tm_year+1900,end->tm_mon+1,end->tm_mday,
     tot->quantity);
-    msg = malloc(sizeof(aux)+1);
+    msg = malloc(strlen(aux)+1);
     strcpy(msg,aux);
     free(tot);
     return msg;
@@ -523,7 +537,7 @@ char* elab_variazione(struct entry *e){
     }
     //printf("aux char by char\n");
     //for(int i = 0;i<2014;i++)printf("%c",aux[i]);
-    msg = malloc(sizeof(aux)+1);
+    msg = malloc(strlen(aux)+1);
     strcpy(msg,aux);
     return msg;
 }
@@ -533,6 +547,7 @@ char* get_elab_result_as_string(struct request *r){
     char * msg;
     struct entries_register *er;
     struct entry *e,*list,*list_prev,*head;
+    printf("Elaboro richiesta r_type-%c e_type-%c\n",r->req_type,r->entry_type);
     er = get_register_by_creation_date(r->date_start);
     if(er==NULL) er=registers_list;
     list_prev = NULL;
@@ -579,12 +594,15 @@ char* get_elab_result_as_string(struct request *r){
     }*/
     switch(r->req_type){
         case 'v':
+            printf("È una variazione!\n Elaboro...\n");
             msg = elab_variazione(head);
         break;
         case 't':
+            printf("È un totale!\n Elaboro...\n");
             msg = elab_totale(head);
         break;
         default:
+        printf("Non riconosciuto...\n");
         return NULL;
     }
 
@@ -609,7 +627,7 @@ char* elab_request(struct request *r){
     if(!flooding_list_all_checked(r->flooding_list))return NULL;
     //Genero il path per il file
     sprintf(file_name,"/%c%c-%ld_%ld.res",r->req_type,r->entry_type,r->date_start,r->date_end);
-    path = malloc(sizeof(my_path)+sizeof(file_name)+1);
+    path = malloc(strlen(my_path)+strlen(file_name)+1);
     strcpy(path,my_path);
     strcat(path,file_name);
     printf("Path: %s\n",path);
@@ -1484,6 +1502,7 @@ struct request* add_new_request(char rt, char t, char* dates){
     struct tm s,e;
     start =NULL;
     end = NULL;
+    printf("r_type = %c e_type = %c\n",rt,t);
     if(rt!='t' && rt!='v'){
         printf("Tipo di richiesta errata \n");
         return NULL;
@@ -1727,16 +1746,17 @@ void user_loop(){
                 break;
             //__esc__
             case 4:
+                printf("Segnale l'uscita al DS...\n");
+                ds_option_set('b');
                 printf("Chiusura in corso...\n");
                 printf("Invio il backup a tutti i vicini...\n");
                 send_backups_to_all();
-                printf("Imposto l'uscita a udp e attendo\n");
-                ds_option_set('b');
-                pthread_join(ds_comunication_thread,&ret);
-                printf("Thread chiuso, invio byebye a tutti...\n");
+                printf("Invio byebye a tutti...\n");
                 send_byebye_to_all();
                 loop_flag = 0;
-                printf("Loop_flag a zero attendo il thread TCP\n");
+                printf("Attendo il thread UDP\n");
+                pthread_join(ds_comunication_thread,&ret);
+                printf("Attendo il thread TCP\n");
                 pthread_join(tcp_comunication_thread,&ret);
                 printf("Socket chiusa\n");
                 
@@ -1987,7 +2007,7 @@ char* generate_backup_message(time_t *s,time_t *e){
         fseek(er->f, 0L, SEEK_END);
         size = ftell(er->f);
         fseek(er->f, 0L, SEEK_SET);
-        msg = malloc(sizeof(char)*(size+strlen(name)));
+        msg = malloc(size+strlen(name));
         strcpy(msg,name);
         if(size == 0){//File vuoto
             free(msg);
@@ -2172,7 +2192,7 @@ char* get_result_if_exist(struct request*r){
     FILE *f;
     if(r==NULL)return NULL;
     sprintf(file_name,"/%c%c-%ld_%ld.res",r->req_type,r->entry_type,r->date_start,r->date_end);
-    path = malloc(sizeof(my_path)+sizeof(file_name)+1);
+    path = malloc(strlen(my_path)+strlen(file_name)+1);
     strcpy(path,my_path);
     strcat(path,file_name);
     printf("Path: %s\n",path);
@@ -2185,6 +2205,7 @@ char* get_result_if_exist(struct request*r){
     fseek(f, 0L, SEEK_SET);
     msg = malloc(size);
     fread((void*)(msg),sizeof(char),size,f);
+    fclose(f);
     return msg;
     //Leggo il file come stringa
 }
@@ -2854,18 +2875,12 @@ printf("%c,%u",prova>>32,prova & mask);
     printf("Mio compleannop %s",ctime(&tt));*/
 
 int main(int argc, char* argv[]){
-    struct request *r;
-    
     if(argc>1){
         my_port = atoi(argv[1]);
     }else{
         my_port = DEFAULT_PORT;
     }
     globals_init();
-    //registers_list_print();
-    r = add_new_request('t','n',NULL);
-    printf("Elab request...\n");
-    elab_request(r);
     if(pthread_create(&tcp_comunication_thread,NULL,tcp_comunication_loop,(void*)&my_port)){
         perror("Errore nella creazione del thread\n");
         exit(EXIT_FAILURE);

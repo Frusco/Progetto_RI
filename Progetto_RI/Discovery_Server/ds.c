@@ -1012,8 +1012,10 @@ void user_loop(int port){
                 //peers_table_print_all_peers();
             break;
             case 5:
+                printf("Segnalazione in corso...");
                 sync_time_add_day();
-                printf("Segnalato\n");
+                sleep(1);
+                printf("Fatto!\n");
                 //peers_table_print_all_peers();
             break;
             //__comando non riconosciuto__
