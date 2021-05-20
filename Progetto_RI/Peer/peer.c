@@ -1,7 +1,7 @@
 
 #include "../consts/const.h"
 #include "../libs/my_sockets.h"
-#include "../libs/my_parser.h"
+#include "../libs/my_logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
@@ -33,6 +33,12 @@ int s_socket;
 char* my_path;
 //Il path della cartella di log ( o del file di log )
 char* my_log_path;
+//log del thread di comunicazione con gli altri peer
+struct my_log *peer_log;
+//Log del thread di comunicazione con il DS
+struct my_log *ds_log;
+//Log del thread utente
+struct my_log *user_log;
 //Data del registro attualmente aperto
 time_t current_open_date;
 //FD set contenente tutte le socket
@@ -149,21 +155,18 @@ int cur_FILE_request_set(struct request* r){
  */
 void cur_FILE_request_free(){
     struct flooding_mate *aux;
-    printf("Dentro alla FILE free\n");
     if(cur_FILE_request==NULL)return;
     if(cur_FILE_request->file_name!=NULL){
         free(cur_FILE_request->file_name);
     }
     
     while(cur_FILE_request->fm){
-        printf("Dentro al loop\n");
         aux = cur_FILE_request->fm;
         cur_FILE_request->fm = cur_FILE_request->fm->next;
         free(aux);
     }
     free(cur_FILE_request);
     cur_FILE_request = NULL;
-    printf("Liberata cur_FILE_request\n");
 }
 
 void send_FILE_request(){
@@ -242,10 +245,10 @@ void manage_FILE_request(char *buffer,int socket_served){
     path = malloc(strlen(my_path)+strlen(buffer)+1);
     strcpy(path,my_path);
     strcat(path,buffer);
-    printf("file da cercare:%s\n",path);
+    my_log_print(peer_log,"file da cercare:%s\n",path);
     f = fopen(path,"rb");
     if(!f){
-        printf("File NON trovato!\n");
+        my_log_print(peer_log,"File NON trovato!\n");
         send_FILE_answer(NULL,socket_served);
         return;
     }
@@ -255,16 +258,14 @@ void manage_FILE_request(char *buffer,int socket_served){
     fseek(f, 0L, SEEK_SET);
     msg = malloc(size);
     if(size==0){
-        printf("Trovato il file, ma è vuoto!\n");
+        my_log_print(peer_log,"Trovato il file, ma è vuoto!\n");
         send_FILE_answer(NULL,socket_served);
         return;
     }
     fread((void*)(msg),sizeof(char),size,f);
     msg[size]='\0';
     fclose(f);
-    printf("Messaggio %s\nCBC\n",msg);
-    for(int i = 0; i<size;i++)printf("%c",msg[i]);
-    printf("Trovato il file! Rispondo\n");
+    my_log_print(peer_log,"Trovato il file! Rispondo\n");
     send_FILE_answer(msg,socket_served);
 }
 int flooding_list_all_checked(struct flooding_mate *fm);
@@ -290,16 +291,16 @@ void manage_FILE_found(char* buffer,int socket_served){
     
     
     n = get_neighbour_by_socket(socket_served);
-    printf("Il vicino id:%d socket:%d ha il file che cerchi\n",n->id,n->socket);
+    my_log_print(peer_log,"Il vicino id:%d socket:%d ha il file che cerchi\n",n->id,n->socket);
     path = malloc(strlen(my_path)+strlen(cur_FILE_request->file_name)+1);//+1
-    printf("my_path = %s len %ld\n",my_path,strlen(my_path));
-    printf("file_name = %s len %ld\n",cur_FILE_request->file_name,strlen(cur_FILE_request->file_name));
+    my_log_print(peer_log,"my_path = %s len %ld\n",my_path,strlen(my_path));
+    my_log_print(peer_log,"file_name = %s len %ld\n",cur_FILE_request->file_name,strlen(cur_FILE_request->file_name));
     strcpy(path,my_path);
     strcat(path,cur_FILE_request->file_name);
-    printf("Path = %s len %ld\n",path,sizeof(path));
-    printf("lunghezza buffer = %ld\n",strlen(buffer));
-    printf("Elaborato salvato in: %s\n",path);
-    printf("File_name = %s",cur_FILE_request->file_name+1);
+    my_log_print(peer_log,"Path = %s len %ld\n",path,sizeof(path));
+    my_log_print(peer_log,"lunghezza buffer = %ld\n",strlen(buffer));
+    my_log_print(peer_log,"Elaborato salvato in: %s\n",path);
+    my_log_print(peer_log,"File_name = %s",cur_FILE_request->file_name+1);
     f = fopen(path,"wb");
     if(f==NULL){
         printf("Errore nella fopen con path= %s",path);
@@ -547,7 +548,7 @@ char* get_elab_result_as_string(struct request *r){
     char * msg;
     struct entries_register *er;
     struct entry *e,*list,*list_prev,*head;
-    printf("Elaboro richiesta r_type-%c e_type-%c\n",r->req_type,r->entry_type);
+    my_log_print(peer_log,"Elaboro richiesta r_type-%c e_type-%c\n",r->req_type,r->entry_type);
     er = get_register_by_creation_date(r->date_start);
     if(er==NULL) er=registers_list;
     list_prev = NULL;
@@ -559,7 +560,6 @@ char* get_elab_result_as_string(struct request *r){
         list->quantity = 0;
         list->timestamp.tv_sec = er->creation_date;
         list->next = NULL;
-        //printf("Lavoro con %ld\nR date end = %ld\nquindi %d\n",list->timestamp.tv_sec,r->date_end,(er->creation_date<=r->date_end));
         //registers_list_print();
         if(list_prev!=NULL){
             //printf("list_prev->next prende list\n prev = %ld, list=%ld",list_prev->timestamp.tv_sec,list->timestamp.tv_sec);
@@ -572,14 +572,13 @@ char* get_elab_result_as_string(struct request *r){
             list_prev = list;
         }
         e = er->entries;
-        //printf("Dentro le entries\n");
+        my_log_print(peer_log,"Inserisco le entries\n");
         while(e){
-            //printf("\tAggiungo %c %ld\n",e->type,e->quantity);
+            my_log_print(peer_log,"Aggiungo %c %ld\n",e->type,e->quantity);
             if(e->type == list->type){ 
                 list->quantity+=e->quantity;
-                //printf("\tList ora %c %ld\n",list->type,list->quantity);
             }else{
-                //printf("\tIgnorato, tipo diverso\n");
+                my_log_print(peer_log,"Ignorato, tipo diverso\n");
             }
             
             e = e->next;
@@ -594,15 +593,15 @@ char* get_elab_result_as_string(struct request *r){
     }*/
     switch(r->req_type){
         case 'v':
-            printf("È una variazione!\n Elaboro...\n");
+            my_log_print(peer_log,"È una variazione!\n Elaboro...\n");
             msg = elab_variazione(head);
         break;
         case 't':
-            printf("È un totale!\n Elaboro...\n");
+            my_log_print(peer_log,"È un totale!\n Elaboro...\n");
             msg = elab_totale(head);
         break;
         default:
-        printf("Non riconosciuto...\n");
+        my_log_print(peer_log,"Non riconosciuto...\n");
         return NULL;
     }
 
@@ -621,6 +620,7 @@ char* elab_request(struct request *r){
     char* result;
     char file_name[128];
     if(r==NULL)return NULL;
+    my_log_print(peer_log,"Elaboro, richiesta...\n");
     //Variazione con un giorno solo?
     if(r->req_type=='v' && r->date_start==r->date_end)return NULL;
     //Controllo che tutti i peer coinvolti abbiano risposto
@@ -630,10 +630,10 @@ char* elab_request(struct request *r){
     path = malloc(strlen(my_path)+strlen(file_name)+1);
     strcpy(path,my_path);
     strcat(path,file_name);
-    printf("Path: %s\n",path);
+    my_log_print(peer_log,"Path: %s\n",path);
     f = fopen(path,"w");
     result = get_elab_result_as_string(r);
-    printf("Risultato:\n%s\n",result);
+    my_log_print(peer_log,"Risultato:\n%s\n",result);
     fprintf(f,"%s",result);
     fclose(f);
     free(result);
@@ -645,7 +645,7 @@ void requestes_list_print(){
     cur = requestes_list;
     printf("Lista richieste:\n");
     while(cur){
-        //printf("req id:%d,socket:%d,r_type:%c,e_type:%c\n",cur->id,cur->ret_socket,cur->entry_type,cur->req_type);
+        printf("req id:%d,socket:%d,r_type:%c,e_type:%c\n",cur->id,cur->ret_socket,cur->entry_type,cur->req_type);
         cur = cur->next;
     }
 }
@@ -879,7 +879,6 @@ void registers_list_print(){
         }
         cur = cur->next;
     }
-    printf("fine stampa\n");
 }
 
 /**
@@ -1028,10 +1027,10 @@ struct neighbour* add_neighbour(int id,int socket,struct in_addr addr,int port) 
         return n;//Già presente!
     } 
     if(socket==-1){//Ricevuto dal DS
-        printf("socket -1 creo connessione\n");
+        //printf("socket -1 creo connessione\n");
         n = neighbour_init_and_connect(id,addr,port);
     }else{//Ricevuto dal socket listener
-        printf("socket %d aggiungo vicino\n",socket);
+        //printf("socket %d aggiungo vicino\n",socket);
         n = neighbour_init(id,socket,addr,port);
     }
     if(n==NULL){
@@ -1045,7 +1044,7 @@ struct neighbour* add_neighbour(int id,int socket,struct in_addr addr,int port) 
     pthread_mutex_unlock(&fd_mutex);
     //E infine inserisco il nuovo vicino nella lista dei vicini
     neighbors_list_add(n);
-    printf("Tutto fatto\n");
+    printf("Tutto pronto!\n");
     pthread_mutex_unlock(&neighbors_list_mutex);
    // neighbors_list_print();
     return n;
@@ -1143,7 +1142,7 @@ void close_today_register_file(){
     
     er = get_open_register();
     if(!er){//Tutti i registri sono chiusi
-        printf("Tutti i registri sono chiusi!\n");
+        my_log_print(ds_log,"Tutti i registri sono chiusi!\n");
         return; 
     }
     position = strlen(er->path);
@@ -1400,7 +1399,7 @@ void registers_list_init(){
     if (d) {
         while ((dir = readdir(d)) != NULL) {//Leggo il nome del file
             if(strcmp((dir->d_name+strlen(dir->d_name)-3),"txt")==0){//Controllo che sia un txt
-                printf("%s estensione %s\n", dir->d_name,(dir->d_name+strlen(dir->d_name)-3));
+                //printf("%s estensione %s\n", dir->d_name,(dir->d_name+strlen(dir->d_name)-3));
                 path_n_file_name = malloc(sizeof(char)*(strlen(my_path)+strlen(dir->d_name)+2));//+2 perché considero anche '/' e "\n"
                 strcpy(path_n_file_name,my_path);
                 strcat(path_n_file_name,"/");
@@ -1416,6 +1415,43 @@ void registers_list_init(){
   current_open_date = er->creation_date;
 }
 
+void logs_init(){
+    char* path;
+    char* name;
+    name = malloc(strlen(DEFAULT_DS_THREAD_NAME)+1);
+    strcpy(name,DEFAULT_DS_THREAD_NAME);
+    path = malloc(strlen(my_path)+strlen(DEFAULT_DS_COMUNITCATION_LOG_FILENAME)+1);
+    strcpy(path,my_path);
+    strcat(path,DEFAULT_DS_COMUNITCATION_LOG_FILENAME);
+    ds_log = my_log_init(path,name);
+    free(path);
+    free(name);
+
+    name = malloc(strlen(DEFAULT_PEER_THREAD_NAME)+1);
+    strcpy(name,DEFAULT_PEER_THREAD_NAME);
+    path = malloc(strlen(my_path)+strlen(DEFAULT_PEER_COMUNICATION_LOG_FILENAME)+1);
+    strcpy(path,my_path);
+    strcat(path,DEFAULT_PEER_COMUNICATION_LOG_FILENAME);
+    peer_log = my_log_init(path,name);
+    free(path);
+    free(name);
+
+    name = malloc(strlen(DEFAULT_USER_THREAD_NAME)+1);
+    strcpy(name,DEFAULT_DS_THREAD_NAME);
+    path = malloc(strlen(my_path)+strlen(DEFAULT_USER_LOG_FILENAME)+1);
+    strcpy(path,my_path);
+    strcat(path,DEFAULT_USER_LOG_FILENAME);
+    user_log = my_log_init(path,name);
+    free(path);
+    free(name);
+
+}
+
+void logs_free(){
+    my_log_free(ds_log);
+    my_log_free(peer_log);
+    my_log_free(user_log);
+}
 
 void ds_option_set(char c);
 /**
@@ -1437,6 +1473,7 @@ void globals_init(){
     neighbors_list = NULL;
     generate_work_folders();
     registers_list_init();
+    logs_init();
     pthread_mutex_init(&neighbors_list_mutex,NULL);
     pthread_mutex_init(&register_mutex,NULL);
     pthread_mutex_init(&fd_mutex,NULL);
@@ -1453,6 +1490,7 @@ void globals_free(){
     requestes_list_free();
     registers_list_free();
     neighbors_list_free();
+    logs_free();
 }
 /*
 ### USER INTERFACE ############################
@@ -1482,7 +1520,7 @@ int check_date_format(char *dates){
     if(dates==NULL)return -1;
     if(strcmp(dates,"")==0)return -1;
     aux = strtok(dates,"-");
-    printf("Stringa trovata %s",aux);
+    my_log_print(user_log,"Stringa trovata %s",aux);
     if(strlen(aux)==1) return 2;
     if(strlen(dates+strlen(aux)+1)==1)return 1;
     return 0;
@@ -1502,7 +1540,7 @@ struct request* add_new_request(char rt, char t, char* dates){
     struct tm s,e;
     start =NULL;
     end = NULL;
-    printf("r_type = %c e_type = %c\n",rt,t);
+    my_log_print(user_log,"r_type = %c e_type = %c\n",rt,t);
     if(rt!='t' && rt!='v'){
         printf("Tipo di richiesta errata \n");
         return NULL;
@@ -1590,7 +1628,6 @@ struct request* add_new_request(char rt, char t, char* dates){
  * @retval None
  */
 void test_add_entry(){
-    printf("TEST_ENTRIES\n");
     int rand_quantity;
     srand(time(NULL));
     for(int i =0 ; i<10 ;i++){
@@ -1643,10 +1680,11 @@ void user_loop(){
     struct request* r;
     printf(PEER_WELCOME_MSG);
     while(loop_flag){
-        printf(">> ");
+        //printf(">> ");
         fgets(msg, 40, stdin);
+        my_log_print(user_log,"User ha scritto: %s\n");
         args_number = sscanf(msg,"%s %s %s %s",args[0],args[1],args[2],args[3]);
-        //arg_len = my_parser(&args,msg);
+        my_log_print(user_log,"Riconosciuti %d args\n",args_number);
         if(args_number>0){
             command_index = find_command(args[0]);
         }else{
@@ -1659,6 +1697,7 @@ void user_loop(){
                 break;
             //__start__
             case 1:
+                my_log_print(user_log,"Riconosciuto comando Start\n");
                 if(my_id!=-1){
                     printf("Sei già connesso alla rete!\nI tuoi vicini:\n");
                     neighbors_list_print();
@@ -1677,6 +1716,7 @@ void user_loop(){
                 break;
             //__add__
             case 2:
+                my_log_print(user_log,"Riconosciuto comando Add\n");
                 if(my_id==-1){
                     printf("Non sei connesso alla rete!\n");
                     break;
@@ -1712,6 +1752,7 @@ void user_loop(){
             break;
             //__get__
             case 3:
+                my_log_print(user_log,"Riconosciuto comando Get\n");
                 if(args_number<3){
                     printf("Inserire aggr type period\n");
                     break;
@@ -1746,6 +1787,8 @@ void user_loop(){
                 break;
             //__esc__
             case 4:
+                
+                my_log_print(user_log,"Riconosciuto comando Esc\n");
                 printf("Segnale l'uscita al DS...\n");
                 ds_option_set('b');
                 printf("Chiusura in corso...\n");
@@ -1762,10 +1805,12 @@ void user_loop(){
                 
             break;
             case 5://showpeers
+                my_log_print(user_log,"Riconosciuto comando Showpeers\n");
                 neighbors_list_print();
             break;
             //__comando non riconosciuto__
             default:
+                my_log_print(user_log,"Comando non valido\n");
                 printf("Comando non riconosciuto!\n");
             break;
         }
@@ -1841,16 +1886,17 @@ int send_greeting_message(struct neighbour* n){
     uint32_t operations=0;
     char operation = 'H';//Hello!
     if(n == NULL) return 0; //Non dovrebbe MAI accadere
+    my_log_print(ds_log,"Mi il mio vicino id %d e socket %d",n->id,n->socket);
     /*GENERO IL MESSAGGIO E LO MANDO DOPO AVER MANDATO IL PRIMO PACCHETTO*/
     len = generate_greeting_message(&buffer);
-    printf("Il messaggio è lungo %u ed è %s\n",len,buffer);
+    my_log_print(ds_log,"Il messaggio è lungo %u ed è %s\n",len,buffer);
     len = htonl(len);
     operations = (unsigned int)operation;
     operations = htonl(operations);
     first_packet = operations;
     first_packet = first_packet<<32 | len;
     len = ntohl(len);
-    printf("First packet %lu, ed è lungo %lu\n",first_packet,sizeof(first_packet));
+    my_log_print(ds_log,"First packet %lu, ed è lungo %lu\n",first_packet,sizeof(first_packet));
     //Mando il primo pacchetto con l'operazione richiesta
     //e la lunghezza del secondo pacchetto
     
@@ -1862,7 +1908,7 @@ int send_greeting_message(struct neighbour* n){
         perror("Errore in fase di invio\n");
         return 0;
     }
-    printf("Saluto inviato!\n");
+    my_log_print(ds_log,"Saluto inviato!\n");
     return 1;
 }
 /**
@@ -1891,7 +1937,7 @@ int generate_entries_list_msg(struct entries_register *er,char **msg){
     
     strcpy(*msg,name);
     if(size == 0){
-        printf("Niente da copiare\n");
+        //printf("Niente da copiare\n");
         free(*msg);
         msg = NULL;
         return size;
@@ -1929,26 +1975,11 @@ int send_byebye_message(struct neighbour* n){
         perror("Errore in fase di invio\n");
         return 0;
     }
-    printf("Addio inviato a %d\n",n->id);
+    my_log_print(user_log,"Addio inviato a %d\n",n->id);
     return 1;
 }
 
-/*
-⢀⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀⣠⣤⣶⣶
-⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⢰⣿⣿⣿⣿
-⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⣀⣀⣾⣿⣿⣿⣿
-⣿⣿⣿⣿⣿⡏⠉⠛⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⣿
-⣿⣿⣿⣿⣿⣿⠀⠀⠀⠈⠛⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠛⠉⠁⠀⣿
-⣿⣿⣿⣿⣿⣿⣧⡀⠀⠀⠀⠀⠙⠿⠿⠿⠻⠿⠿⠟⠿⠛⠉⠀⠀⠀⠀⠀⣸⣿
-⣿⣿⣿⣿⣿⣿⣿⣷⣄⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⣿⣿
-⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠠⣴⣿⣿⣿⣿ I LIMONI SIGNORAAAAA
-⣿⣿⣿⣿⣿⣿⣿⣿⡟⠀⠀⢰⣹⡆⠀⠀⠀⠀⠀⠀⣭⣷⠀⠀⠀⠸⣿⣿⣿⣿
-⣿⣿⣿⣿⣿⣿⣿⣿⠃⠀⠀⠈⠉⠀⠀⠤⠄⠀⠀⠀⠉⠁⠀⠀⠀⠀⢿⣿⣿⣿
-⣿⣿⣿⣿⣿⣿⣿⣿⢾⣿⣷⠀⠀⠀⠀⡠⠤⢄⠀⠀⠀⠠⣿⣿⣷⠀⢸⣿⣿⣿
-⣿⣿⣿⣿⣿⣿⣿⣿⡀⠉⠀⠀⠀⠀⠀⢄⠀⢀⠀⠀⠀⠀⠉⠉⠁⠀⠀⣿⣿⣿
-⣿⣿⣿⣿⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢹⣿⣿
-⣿⣿⣿⣿⣿⣿⣿⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿
-*/
+
 
 /**
  * @brief  Lancia send_byebye_message(...) a tutti i membri della neighbors_list
@@ -1984,10 +2015,8 @@ char* generate_backup_message(time_t *s,time_t *e){
     if(er == NULL) return NULL;
     end = (e==NULL)?0x7fffffffffffffff:*e;
     start = (s==NULL)?0:*s;
-    printf("Prima di stampare end\n");
-    //printf("%s",ctime(&end));
     while(er){
-        printf("er = %ld\n",er->creation_date);
+        //printf("er = %ld\n",er->creation_date);
         if(er->creation_date<start){//Data non compresa
             er = er->next;
             continue;
@@ -1999,7 +2028,7 @@ char* generate_backup_message(time_t *s,time_t *e){
        // printf("Prima di aprire il file\n");
         er->f=fopen(er->path,"r");
         if(er->f==NULL){
-            printf("file non presente, continuo\n");
+            //printf("file non presente, continuo\n");
             er = er->next;
             continue;
         }
@@ -2052,15 +2081,16 @@ void send_backups_to_all(){
     pthread_mutex_lock(&neighbors_list_mutex);
     n = neighbors_list;
     if(n==NULL){
-        printf("Nessun vicino!\n");
+        my_log_print(user_log,"Nessun vicino!\n");
         goto end_send_to_all;
         return;
     }
     char operation = 'U';//Update!
-    printf("Genero il messaggio di backup\n");
+    my_log_print(user_log,"Genero il messaggio di backup\n");
     char *msg = generate_backup_message(NULL,NULL);
+    my_log_print(peer_log,"Il messaggio: %s\n",msg);
     if(msg==NULL){
-        printf("Niente da inviare\n");
+        my_log_print(user_log,"Niente da inviare\n");
         goto end_send_to_all;
         return;
     }
@@ -2085,13 +2115,13 @@ void send_backups_to_all(){
             n=n->next;
             continue;
         }
-        printf("Backup inviato a %d porta=%u\n",n->id,n->addr.sin_port);
+        my_log_print(user_log,"Backup inviato a %d porta=%u\n",n->id,n->addr.sin_port);
         n=n->next;
     }
 free(msg);
 end_send_to_all:
     pthread_mutex_unlock(&neighbors_list_mutex);
-    printf("Fine invio backup!\n");
+    my_log_print(user_log,"Fine invio backup!\n");
 }
 
 /**
@@ -2129,17 +2159,19 @@ void send_request_to_all(struct request *r,int *avoid_socket){
     uint32_t len; // lunghezza messaggio
     uint32_t operations=0;
     struct neighbour *n;
+    my_log_print(peer_log,"Invio una richiesta dati ( flooding )\n");
     pthread_mutex_lock(&neighbors_list_mutex);
     char operation = 'R';//Request!
     char *msg = generate_request_message(r);
+    my_log_print(peer_log,"Il messaggio: %s",msg);
     n = neighbors_list;
     if(n==NULL){
-        printf("Nessun vicino!\n");
+        my_log_print(peer_log,"Nessun vicino!\n");
         goto end_req_to_all;
         return;
     }
     if(msg==NULL){
-        printf("Niente da inviare\n");
+        my_log_print(peer_log,"Niente da inviare\n");
         goto end_req_to_all;
         return;
     }
@@ -2150,7 +2182,7 @@ void send_request_to_all(struct request *r,int *avoid_socket){
     first_packet = operations;
     first_packet = first_packet<<32 | len;
     len = ntohl(len);
-    printf("Generato il messaggio di lunghezza %dl\n messaggio:\n%s\n",len,msg);
+    my_log_print(peer_log,"Generato il messaggio di lunghezza %dl\n messaggio:\n%s\n",len,msg);
     while(n){
         if(avoid_socket){//Socket da evitare ( ci ha inviato lei la richiesta )
             if(n->socket==*avoid_socket){
@@ -2170,15 +2202,14 @@ void send_request_to_all(struct request *r,int *avoid_socket){
             n=n->next;
             continue;
         }
-        printf("Request inviato a %d porta=%u\n",n->id,n->addr.sin_port);
+        my_log_print(peer_log,"Request inviata a %d porta=%u\n",n->id,n->addr.sin_port);
         n=n->next;
-        printf("Fine loop\n");
     }
     
 end_req_to_all:
     pthread_mutex_unlock(&neighbors_list_mutex);
     if(msg) free(msg);
-    printf("Fine invio backup!\n");
+    my_log_print(peer_log,"Fine invio backup!\n");
 }
 
 
@@ -2195,7 +2226,7 @@ char* get_result_if_exist(struct request*r){
     path = malloc(strlen(my_path)+strlen(file_name)+1);
     strcpy(path,my_path);
     strcat(path,file_name);
-    printf("Path: %s\n",path);
+    //printf("Path: %s\n",path);
     f = fopen(path,"r");
     if(!f)return NULL; //File inesistente
     fseek(f, 0L, SEEK_SET);
@@ -2224,14 +2255,15 @@ void send_request_data(struct request *r){
     uint64_t first_packet=0; // contiene la lunghezza del prossimo messaggio e del codice
     uint32_t len; // lunghezza messaggio
     uint32_t operations=0;    char operation = 'A';//Answer!
+    my_log_print(peer_log,"Invio i dati richiesti...\n");
     if(r==NULL){
-        printf("La request è NULL!\n");
+        my_log_print(peer_log,"La request è NULL!\n");
         return;
     }
     backup = generate_backup_message(&r->date_start,&r->date_end);
     req_header = generate_request_message(r);
     if(!backup || !req_header){
-        printf("Nienten da inviare\n");
+        my_log_print(peer_log,"Nienten da inviare\n");
         return;
     }
     msg =malloc(strlen(backup)+strlen(req_header)+1);
@@ -2313,18 +2345,18 @@ int manage_request_answer(char *buffer,int socket){
     //printf("Request\n%s\n",buffer);
     r = requestes_list_get(tp,id);
     if(r==NULL){//Non dovrebbe accadere, ma la gestiamo
-        printf("Risposta di una richiesta inesistente\n");
+        my_log_print(peer_log,"Risposta di una richiesta inesistente\n");
         return 0;
     }
     n = get_neighbour_by_socket(socket);
     if(n==NULL){
-        printf("Nessun vicino corrisponde alla socket passata!\n");
+        my_log_print(peer_log,"Nessun vicino corrisponde alla socket passata!\n");
         return 0;
     }
     //printf("Socket che sto servendo: %d, nid=%d ns=%d\n",socket,n->id,n->socket);
     //flooding_list_print(r->flooding_list);
     if(!flooding_list_check_flooding_mate(r->flooding_list,n->id,socket)){
-        printf("Il vicino %d non è in lista!\n",n->id);
+        my_log_print(peer_log,"Il vicino %d non è in lista!\n",n->id);
         /*Qualcosa è andato storto, abbiamo ricevuto un pacchetto
         * non aspettato. Lo ignoriamo.
         */
@@ -2363,7 +2395,7 @@ int send_ignore_my_answer(char *msg,int socket){
     first_packet = operations;
     first_packet = first_packet<<32 | len;
     len = ntohl(len);
-    printf("Request IGNORE:\n -lunghezza %u\n -messaggio:\n%s\n",len,msg);
+    my_log_print(peer_log,"Request IGNORE:\n -lunghezza %u\n -messaggio:\n%s\n",len,msg);
     if(send(socket,(void*)&first_packet,sizeof(first_packet),0)<0){
             perror("Errore in fase di invio");
             return 0;
@@ -2391,12 +2423,13 @@ int manage_new_request(char *buffer,int socket){
     //printf("Request\n%s\n",buffer);
     r = requestes_list_get(tp,id);
     if(r){
-        printf("Richiesta già presente, gestisco il loop\n");
+        my_log_print(peer_log,"Richiesta già presente, gestisco il loop\n");
         /* Invio una risposta una risposta speciale
         *  per togliermi dai flooding mates.
         */
+       my_log_print(peer_log,"Invio un messaggio 'Ignora' all socket %d",socket);
         if(!send_ignore_my_answer(buffer,socket)){
-            printf("Impossibile inviare la richiesta di ignoramento alla socket=%d\n",socket);
+            my_log_print(peer_log,"Impossibile inviare la richiesta 'Ignora' alla socket=%d\n",socket);
         }
         return 0;
     }
@@ -2476,23 +2509,25 @@ int manage_register_backup(char *msg){
     int loop_size;
     char aux[100];
     //printf("Il messaggio parziale di A:\n%s\n",msg);
+    my_log_print(peer_log,"Gestione del messaggio di backup\n");
     pthread_mutex_lock(&register_mutex);
     while(sscanf(msg+len,"%s",aux)==1){
         len += strlen(aux)+1;
         sscanf(aux,"%ld,%u",&cd,&loop_size);
         er = get_register_by_creation_date(cd);
+        my_log_print(peer_log,"Lavoro con il registro %d\n",er->creation_date);
         for(int i=0;i<loop_size;i++){
             sscanf(msg+len,"%s",aux);
             len+=strlen(aux)+1;
             e = malloc(sizeof(struct entry));
-            ///printf("Leggo riga %s\n",aux);
+            my_log_print(peer_log,"Leggo riga %s\n",aux);
             if(sscanf(aux,"%ld.%ld:%c,%ld",
             &e->timestamp.tv_sec,
             &e->timestamp.tv_nsec,
             &e->type,
             &e->quantity)==4){
                 if(er==NULL){
-                    printf("er è NULL\n");
+                    my_log_print(peer_log,"Il registro corrente è NULL, lo inizializzo\n");
                     //Costruisco un registro di cui non conoscevo l'esistenza e continuo
                     er = init_closed_register(cd);
                     registers_list_add(er);
@@ -2500,6 +2535,7 @@ int manage_register_backup(char *msg){
                 ret = add_entry_in_register(er,e);
                 if(ret){//È stato effettivamento inserito ( non è un duplicato )
                     //Controlliamo che il registro non sia chiuso
+                    my_log_print(peer_log,"Entry inserita con successo!\n");
                     final_ret = final_ret || ret;
                     er->f=fopen(er->path,"a");
                     fprintf(er->f,"%ld.%ld:%c,%ld\n",e->timestamp.tv_sec,
@@ -2508,6 +2544,8 @@ int manage_register_backup(char *msg){
                     e->quantity);
                     //Infine richiudiamo il registro
                     fclose(er->f);
+                }else{
+                    my_log_print(peer_log,"Entry già presente, continuo...\n");
                 }
             }else{//messaggio corrotto
                 continue;
@@ -2643,7 +2681,7 @@ void* ds_comunication_loop(void *arg){
         option = ds_option_get();
         //Richiesta vicini
         sprintf(buffer,"%u,%d,%ld,%c",my_addr.s_addr,my_port,current_open_date,option);
-  
+        my_log_print(peer_log,"Invio %c al DS\n",option);
         sendto(socket,&buffer,strlen(buffer)+1,0,(struct sockaddr*)&ds_addr,ds_addrlen);
         ds_to_read = ds_master;
         timeout.tv_sec = DS_COMUNICATION_LOOP_SLEEP_TIME;
@@ -2651,23 +2689,25 @@ void* ds_comunication_loop(void *arg){
         //perror("Select:");
         if(ret==1){
             if(recvfrom(socket,buffer,DS_BUFFER,0,(struct sockaddr*)&ds_addr,&ds_addrlen)<0){
-                printf("Errore nella ricezione");
+                printf("DS_Thread: Errore nella ricezione");
                 continue;
             }
             if(option=='x'){//Richiesta della lista dei vicini
-                printf("messaggio ricevuto:\n %s",buffer);
+                my_log_print(ds_log,"Ricevuta lista dei peer:\n %s",buffer);
                 update_neighbors(buffer);
+                my_log_print(peer_log,"Imposto la comunicazione su Refresh");
                 ds_option_set('r');//Il loop passa in modalità sincronizzazione ( refresh )
             }else if(option == 'r'){
                 //printf("Ricevuto \n%s\n",buffer);
                 //printf("Subito dopo ricevuto\n%ld",time_recived);
-                printf("Registro di oggi chiuso.\n");
+                my_log_print(ds_log,"Ho ricevuto il comando di chiudere il registro, apro il successivo\n");
                 sscanf(buffer,"%ld\n",&time_recived);
                 //printf("Il mio tempo:%ld , ricevuto:%ld ",get_current_open_date(),time_recived);
                 if(time_recived > get_current_open_date()){//dobbiamo sincronizzarci
                     set_current_open_date(time_recived);
                     close_today_register();
-                    printf("Aperto nuovo registro\n");
+                    my_log_print(ds_log,"Aperto nuovo registro\n");
+                    my_log_print(peer_log,"Simulo 10 nuove entrate casuali\n");
                     test_add_entry();   
 
                 }
@@ -2699,6 +2739,7 @@ void serve_peer(int socket_served){
     struct in_addr peer_addr;
     //printf("Servo %d",socket_served);
     if(recv(socket_served,(void*)&first_packet,sizeof(first_packet),0)<0){
+
         remove_neighbour(get_neighbour_by_socket(socket_served)->id);
         ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo amichetto
         return;
@@ -2712,69 +2753,75 @@ void serve_peer(int socket_served){
     //printf("L'operazione è %d e la lunghezza è %d\n",options,len);
     operation =(char) options; // ci serve il primo byte
     //printf("operation %c\n",operation);
-    printf("Giunta operazione %c con lungezza %d\n",operation,len);
+    my_log_print(peer_log,"Giunta operazione %c con lungezza %d\n",operation,len);
     if(len>0){
-        printf("Prima della malloc del buffer con len = %d\n",len);
+        my_log_print(peer_log,"Allogazione del buffer di lunghezza %d\n",len);
         buffer = malloc(sizeof(char)*len);
-            if(recv(socket_served,(void*)buffer,len,0)<0){
-                perror("Errore in fase di ricezione\n");
-                return;
-            }
+        my_log_print(peer_log,"In attesa del messaggio...\n",len);
+        if(recv(socket_served,(void*)buffer,len,0)<0){
+            my_log_print(peer_log,"Errore nella ricezione, gestisco...\n",len);
+            perror("Errore in fase di ricezione\n");
+            return;
+        }
+        my_log_print(peer_log,"Messaggio ricevuto!\n");
     }
     switch(operation){
         case 'H': //Nuovo peer (Hello!)
+            my_log_print(peer_log,"Gestione di una operazione 'Hello'\n");
             sscanf(buffer,"%d,%u,%d",&peer_id,&peer_addr.s_addr,&peer_port);
-            //printf("Quello che ho letto %d,%u,%d\n",peer_id,peer_addr.s_addr,peer_port);
+            my_log_print(peer_log,"Un nuovo peer si è unito al vicinato! id: %d addr: %u, porta: %d\n",peer_id,peer_addr.s_addr,peer_port);
             add_neighbour(peer_id,socket_served,peer_addr,peer_port);
+            my_log_print(peer_log,"È arrivato un nuovo peer!:\n");
             neighbors_list_print();
             break;
         case 'U'://Update
-            printf("Ricevuto un messaggio di backup da %d\n",socket_served);
-            printf("Messaggio ricevuto\n%s\n",buffer);
+            my_log_print(peer_log,"Gestione di un messaggio di backup da %d\n",socket_served);
+            my_log_print(peer_log,"Messaggio ricevuto\n%s\n",buffer);
             manage_register_backup(buffer);
-            printf("Lista aggiornata\n");
             //registers_list_print();
             break;
         case 'R'://Request
-            printf("Nuova Request da %d\n",socket_served);
-            printf("Messaggio ricevuto\n%s\n",buffer);
+            my_log_print(peer_log,"Gestione di una Request ricevuta da %d\n",socket_served);
+            my_log_print(peer_log,"Request : %s\n",buffer);
             manage_new_request(buffer,socket_served);
             //requestes_list_print();
             break;
         case 'r'://File Request
-            printf("Richiesta file da %d\n",socket_served);
-            printf("Messaggio ricevuto\n%s\n",buffer);
+            my_log_print(peer_log,"Richiesta file da %d\n",socket_served);
+            my_log_print(peer_log,"Messaggio ricevuto\n%s\n",buffer);
             manage_FILE_request(buffer,socket_served);
             break;
         case 'I'://Ignore
-            printf("Ricevuto 'Ignora' da %d\n",socket_served);
-            printf("Messaggio ricevuto\n%s\n",buffer);
+            my_log_print(peer_log,"Ricevuto 'Ignora' da %d\n",socket_served);
+            my_log_print(peer_log,"Messaggio ricevuto\n%s\n",buffer);
             manage_ignore_answer(buffer,socket_served);
             break;
         case 'N'://Not found
-            printf("Ricevuto File Not Found da %d\n",socket_served);
+            my_log_print(peer_log,"Ricevuto File Not Found da %d\n",socket_served);
             manage_FILE_not_found(socket_served);
             break;
         case 'A'://Answer
-            printf("Ricevuto una risposta da %d\n",socket_served);
-            //printf("Messaggio ricevuto\n%s\n",buffer);
+            my_log_print(peer_log,"Ricevuto una risposta da %d\n",socket_served);
+            my_log_print(peer_log,"Messaggio ricevuto\n%s\n",buffer);
             manage_request_answer(buffer,socket_served);
             break;
         case 'F'://File Found
-            printf("Ricevuto un File da %d\n",socket_served);
-            printf("Messaggio ricevuto\n%s\n",buffer);
+            my_log_print(peer_log,"Ricevuto un File da %d\n",socket_served);
+            my_log_print(peer_log,"Messaggio ricevuto\n%s\n",buffer);
             manage_FILE_found(buffer,socket_served);
             break;
         case 'B'://bye bye
+            my_log_print(peer_log,"Ricevuto un messaggio di addio da %d\n",socket_served);
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
+            my_log_print(peer_log,"Sengalo al DS_thread di richiedere la lista dei peer %d\n",socket_served);
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
             neighbors_list_print();
             break;
         default:
-            printf("Messaggio ricevuto\n%s\n",buffer);
             //Il messaggio non rispetta i protocolli di comunicazione, rimuovo il peer
-            printf("Il peer non rispetta i protocolli di comunicazione\n");
+            my_log_print(peer_log,"Il peer non rispetta i protocolli di comunicazione, lo elimino dalla lista dei peer\n");
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
+            my_log_print(peer_log,"Sengalo al DS_thread di richiedere la lista dei peer %d\n",socket_served);
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
             neighbors_list_print();
             break;
@@ -2794,6 +2841,7 @@ void * tcp_comunication_loop(void *arg){
     socklen_t len;
     struct timeval timeout;
     timeout.tv_usec = 0;
+    my_log_print(peer_log,"Tentativo apertura socket alla porta %d",s_port);
     ret = open_tcp_server_socket(&s_socket,&s_addr,s_port);
     if(ret<0){
         perror("Errore nella costruzione della server socket\n");
@@ -2801,12 +2849,14 @@ void * tcp_comunication_loop(void *arg){
     }
     ret = listen(s_socket,DEFAULT_SOCKET_SLOTS);
     printf("Socket tcp aperta alla porta: %d\n",s_port);
+    my_log_print(peer_log,"Socket aperta con successo\n",s_port);
     
     FD_SET(s_socket,&master);
-    printf("Server socket = %d\n",s_socket);
+    //printf("Server socket = %d\n",s_socket);
     pthread_mutex_lock(&fd_mutex);
     max_socket = s_socket;
     pthread_mutex_unlock(&fd_mutex);
+    my_log_print(peer_log,"Tutto pronto, inizio loop\n");
     while(loop_flag){
         pthread_mutex_lock(&fd_mutex);
         to_read = master;
@@ -2818,10 +2868,10 @@ void * tcp_comunication_loop(void *arg){
                 if(socket_i == s_socket){
                     len = sizeof(peer_addr);
                     peer_socket = accept(s_socket,(struct sockaddr*) &peer_addr,&len);
-                    printf("È arrivato un nuovo peer : %d\n",peer_socket);
+                    my_log_print(peer_log,"È arrivato un nuovo peer socket:%d\n",peer_socket);
                     serve_peer(peer_socket);
                 }else{//Serviamo un peer;
-                    printf("Servo il client : %d\n",socket_i);
+                    my_log_print(peer_log,"Servo il client : %d\n",socket_i);
                     serve_peer(socket_i);
                     
                     /*if(send(socket_i,(void*)buffer,len,0)<0){
@@ -2881,12 +2931,12 @@ int main(int argc, char* argv[]){
         my_port = DEFAULT_PORT;
     }
     globals_init();
+    my_log_print(user_log,"Provo a dire %d cose\n",5);
     if(pthread_create(&tcp_comunication_thread,NULL,tcp_comunication_loop,(void*)&my_port)){
         perror("Errore nella creazione del thread\n");
         exit(EXIT_FAILURE);
     }
     sleep(1);
-    printf("inizio user loop\n");
     user_loop();
     globals_free();
     printf("Ciao, ciao!\n");

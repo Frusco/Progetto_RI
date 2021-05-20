@@ -8,8 +8,8 @@ all: ds peer
 
 ds: ds.o my_sockets.o ds.o
 	gcc -Wall ds.o my_sockets.o -lpthread -std=c11 -o ds
-peer: peer.o my_sockets.o
-	gcc -Wall peer.o my_sockets.o -lpthread -std=c11 -o peer
+peer: peer.o my_sockets.o my_logger.o
+	gcc -Wall peer.o my_sockets.o my_logger.o -lpthread -std=c11 -o peer
 
 peer.o: consts/const.h Peer/peer.c
 	gcc -Wall -c Peer/peer.c -lpthread -std=c11
