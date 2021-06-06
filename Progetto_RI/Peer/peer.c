@@ -241,6 +241,7 @@ void manage_FILE_request(char *buffer,int socket_served){
     char *path;
     char *msg;
     int size;
+    int ret;
     FILE *f;
     path = malloc(strlen(my_path)+strlen(buffer)+1);
     strcpy(path,my_path);
@@ -255,17 +256,31 @@ void manage_FILE_request(char *buffer,int socket_served){
     fseek(f, 0L, SEEK_SET);
     fseek(f, 0L, SEEK_END);
     size = ftell(f);
+    my_log_print(peer_log,"Trovato il file, dimensione: %dB\n",size);
     fseek(f, 0L, SEEK_SET);
     msg = malloc(size);
-    if(size==0){
-        my_log_print(peer_log,"Trovato il file, ma è vuoto!\n");
+    if(!msg){
+        my_log_print(peer_log,"Errore durante l'allocazione della memoria per leggere il FILE\n");
         send_FILE_answer(NULL,socket_served);
         return;
     }
-    fread((void*)(msg),sizeof(char),size,f);
+    if(size==0){
+        my_log_print(peer_log,"Trovato il file, ma è vuoto!\n");
+        fclose(f);
+        send_FILE_answer(NULL,socket_served);
+        return;
+    }
+    my_log_print(peer_log,"Tentativo di lettura\n");
+    ret = fread((void*)(msg),sizeof(char),size,f);
+    if(ret!=size){
+        my_log_print(peer_log,"Tentativo di lettura fallito size = %dB ma sono stati letti %dB\n",size,ret);
+        fclose(f);
+        send_FILE_answer(NULL,socket_served);
+        return;
+    }
     msg[size]='\0';
     fclose(f);
-    my_log_print(peer_log,"Trovato il file! Rispondo\n");
+    my_log_print(peer_log,"Lettura completata con successo! Rispondo alla richiesta\n");
     send_FILE_answer(msg,socket_served);
 }
 int flooding_list_all_checked(struct flooding_mate *fm);
@@ -289,7 +304,7 @@ void manage_FILE_found(char* buffer,int socket_served){
     char* path;
     FILE *f;
     
-    
+    if(cur_FILE_request == NULL) return;//Abbiamo già ottenuto una risposta!
     n = get_neighbour_by_socket(socket_served);
     my_log_print(peer_log,"Il vicino id:%d socket:%d ha il file che cerchi\n",n->id,n->socket);
     path = malloc(strlen(my_path)+strlen(cur_FILE_request->file_name)+1);//+1
@@ -466,7 +481,7 @@ void requestes_list_free(){
 
 char* elab_totale(struct entry *e){
     char *msg;
-    char aux[128];
+    char aux[256];
     struct entry *tot;
     struct tm *start;
     struct tm *end;
@@ -483,7 +498,7 @@ char* elab_totale(struct entry *e){
         }
         e = e->next;
     }
-    sprintf(aux,"Totale dal %d:%d:%d al %d:%d:%d è %ld",
+    sprintf(aux,"Totale dal %d:%d:%d al %d:%d:%d è %ld\n",
     start->tm_year+1900,start->tm_mon+1,start->tm_mday,
     end->tm_year+1900,end->tm_mon+1,end->tm_mday,
     tot->quantity);
@@ -593,15 +608,15 @@ char* get_elab_result_as_string(struct request *r){
     }*/
     switch(r->req_type){
         case 'v':
-            my_log_print(peer_log,"È una variazione!\n Elaboro...\n");
+            my_log_print(peer_log,"Elaboro variazione richiesta\n");
             msg = elab_variazione(head);
         break;
         case 't':
-            my_log_print(peer_log,"È un totale!\n Elaboro...\n");
+            my_log_print(peer_log,"Elaboro totale richiesta\n");
             msg = elab_totale(head);
         break;
         default:
-        my_log_print(peer_log,"Non riconosciuto...\n");
+        my_log_print(peer_log,"Tipo di elaborazione non riconosciuta! %c\n",r->req_type);
         return NULL;
     }
 
@@ -634,6 +649,7 @@ char* elab_request(struct request *r){
     f = fopen(path,"w");
     result = get_elab_result_as_string(r);
     my_log_print(peer_log,"Risultato:\n%s\n",result);
+    printf("Risultato:\n%s\n",result);
     fprintf(f,"%s",result);
     fclose(f);
     free(result);
@@ -1044,7 +1060,7 @@ struct neighbour* add_neighbour(int id,int socket,struct in_addr addr,int port) 
     pthread_mutex_unlock(&fd_mutex);
     //E infine inserisco il nuovo vicino nella lista dei vicini
     neighbors_list_add(n);
-    printf("Tutto pronto!\n");
+    //printf("Tutto pronto!\n");
     pthread_mutex_unlock(&neighbors_list_mutex);
    // neighbors_list_print();
     return n;
@@ -1437,7 +1453,7 @@ void logs_init(){
     free(name);
 
     name = malloc(strlen(DEFAULT_USER_THREAD_NAME)+1);
-    strcpy(name,DEFAULT_DS_THREAD_NAME);
+    strcpy(name,DEFAULT_USER_THREAD_NAME);
     path = malloc(strlen(my_path)+strlen(DEFAULT_USER_LOG_FILENAME)+1);
     strcpy(path,my_path);
     strcat(path,DEFAULT_USER_LOG_FILENAME);
@@ -1682,7 +1698,7 @@ void user_loop(){
     while(loop_flag){
         //printf(">> ");
         fgets(msg, 40, stdin);
-        my_log_print(user_log,"User ha scritto: %s\n");
+        my_log_print(user_log,"User ha scritto: %s",msg);
         args_number = sscanf(msg,"%s %s %s %s",args[0],args[1],args[2],args[3]);
         my_log_print(user_log,"Riconosciuti %d args\n",args_number);
         if(args_number>0){
@@ -1700,16 +1716,19 @@ void user_loop(){
                 my_log_print(user_log,"Riconosciuto comando Start\n");
                 if(my_id!=-1){
                     printf("Sei già connesso alla rete!\nI tuoi vicini:\n");
+                    my_log_print(user_log,"User già collegato alla rete, annullo.\n");
                     neighbors_list_print();
                     break;
                 }
                 if(args_number < 2){
                     printf("Manca la porta del DS\n");
+                    my_log_print(user_log,"Errore, troppi pochi argomenti, annullo.\n");
                     break;
                 }
                 port = atoi(args[1]);
                 if(pthread_create(&ds_comunication_thread,NULL,ds_comunication_loop,(void*)&port)){
                     perror("Errore nella creazione del thread\n");
+                    my_log_print(user_log,"Errore fatale, impossibile creare il thread per comunicare con il DS\n");
                     exit(EXIT_FAILURE);
                 }
                 test_add_entry();
@@ -1719,11 +1738,13 @@ void user_loop(){
                 my_log_print(user_log,"Riconosciuto comando Add\n");
                 if(my_id==-1){
                     printf("Non sei connesso alla rete!\n");
+                    my_log_print(user_log,"Utente non connesso alla rete, operazione ignorata\n");
                     break;
                 }
                 type = *args[1];
                 if( type!='n' && type!='t'){
                     printf("Tipo non valido, accettato solo n e t\n");
+                    my_log_print(user_log,"Argomento 'type' pasato sbagliato: %c\n",type);
                     break;
                 }
                 for(int i =0;i<strlen(args[2]);i++){
@@ -1743,38 +1764,48 @@ void user_loop(){
                 while((getchar()) != '\n'); 
                 if(confirm!='y'){
                     printf("Entry annullata\n");
+                    my_log_print(user_log,"Entry annulata dall'utente\n");
                     break;
                 }
                 if(create_entry(type,quantity)==0){
                     printf("Impossibile inserire una nuova entry!\n");
+                    my_log_print(user_log,"Errore durante la creazione della entry, annulato\n");
                     break;
                 }
+                printf("Inserimento avvenuto con successo!\n");
             break;
             //__get__
             case 3:
                 my_log_print(user_log,"Riconosciuto comando Get\n");
                 if(args_number<3){
                     printf("Inserire aggr type period\n");
+                    my_log_print(user_log,"Args passati < 3 , 'get' annulato\n");
                     break;
                 }
                 if(args_number<4){
+                    my_log_print(user_log,"Quarto argomento non trovato, sostituito con stringa vuota\n");
                     strcpy(args[3],"");
                 }
                 r = add_new_request(args[1][0],args[2][0],args[3]);
+                my_log_print(user_log,"Nuova Request inserita con successo: %ld \n",r->timestamp);
                 result = get_result_if_exist(r);
                 if(result!=NULL){
                     printf("Calcolo già effettuato in precedenza:\n%s",result);
+                    my_log_print(user_log,"Calcolo già effettuato in precedenza:\n%s",result);
                     free(result);
                     break;
                 }
                 printf("File non esistente, controllo i registri per poterlo calcolare\n");
+                my_log_print(user_log,"File non esistente, avvio controllo dei registri per calcolo\n");
                 result = elab_request(r);
                 if(result!=NULL){
                     printf("Calcolo effettuato localmente:\n%s\n",result);
+                    my_log_print(user_log,"Calcolo effettuato localmente:\n%s\n",result);
                     free(result);
                     break;
                 }
                 printf("Non abbiamo tutti i dati, chiedo ai vicini il FILE\n");
+                my_log_print(user_log,"Registri non completi, richiesta ai vicini del FILE richiesto\n");
                 if(my_id==-1){
                     printf("Non sei connesso alla rete!\n");
                     break;
@@ -1783,7 +1814,7 @@ void user_loop(){
                 send_FILE_request();
                 //Creo un FILE_request e attendo.
                 //send_request_to_all(r,NULL);
-                requestes_list_print();
+                //requestes_list_print();
                 break;
             //__esc__
             case 4:
@@ -1865,7 +1896,6 @@ void user_loop(){
 unsigned int generate_greeting_message(char** msg){
     char buffer[255];
     unsigned int len;
-    printf("Il mio ID è %d\n",my_id);
     sprintf(buffer,"%d,%u,%d",my_id,my_addr.s_addr,my_port);
     len = sizeof(char)*strlen(buffer)+1;
     *msg = malloc(len);
@@ -1886,7 +1916,7 @@ int send_greeting_message(struct neighbour* n){
     uint32_t operations=0;
     char operation = 'H';//Hello!
     if(n == NULL) return 0; //Non dovrebbe MAI accadere
-    my_log_print(ds_log,"Mi il mio vicino id %d e socket %d",n->id,n->socket);
+    my_log_print(ds_log,"Nuovo vicino id %d e socket %d\n",n->id,n->socket);
     /*GENERO IL MESSAGGIO E LO MANDO DOPO AVER MANDATO IL PRIMO PACCHETTO*/
     len = generate_greeting_message(&buffer);
     my_log_print(ds_log,"Il messaggio è lungo %u ed è %s\n",len,buffer);
@@ -2121,7 +2151,7 @@ void send_backups_to_all(){
 free(msg);
 end_send_to_all:
     pthread_mutex_unlock(&neighbors_list_mutex);
-    my_log_print(user_log,"Fine invio backup!\n");
+    my_log_print(user_log,"Completato\n");
 }
 
 /**
@@ -2209,7 +2239,7 @@ void send_request_to_all(struct request *r,int *avoid_socket){
 end_req_to_all:
     pthread_mutex_unlock(&neighbors_list_mutex);
     if(msg) free(msg);
-    my_log_print(peer_log,"Fine invio backup!\n");
+    my_log_print(peer_log,"\n");
 }
 
 
@@ -2263,10 +2293,15 @@ void send_request_data(struct request *r){
     backup = generate_backup_message(&r->date_start,&r->date_end);
     req_header = generate_request_message(r);
     if(!backup || !req_header){
-        my_log_print(peer_log,"Nienten da inviare\n");
+        my_log_print(peer_log,"Niente da inviare\n");
         return;
     }
+    my_log_print(peer_log,"La dimensione da alloracare è %dB",strlen(backup)+strlen(req_header)+1);
     msg =malloc(strlen(backup)+strlen(req_header)+1);
+    if(!msg){
+        my_log_print(peer_log,"Errore durante l'allocazione del messaggio\n");
+        return;
+    }
     //printf("BACKUP:\n%s\nHEADER:%s\n",backup,req_header);
     strcpy(msg,req_header);
     //printf("MSG_parziale:%s",msg);
@@ -2427,7 +2462,7 @@ int manage_new_request(char *buffer,int socket){
         /* Invio una risposta una risposta speciale
         *  per togliermi dai flooding mates.
         */
-       my_log_print(peer_log,"Invio un messaggio 'Ignora' all socket %d",socket);
+       my_log_print(peer_log,"Invio un messaggio 'Ignora' alla socket %d\n",socket);
         if(!send_ignore_my_answer(buffer,socket)){
             my_log_print(peer_log,"Impossibile inviare la richiesta 'Ignora' alla socket=%d\n",socket);
         }
@@ -2681,7 +2716,7 @@ void* ds_comunication_loop(void *arg){
         option = ds_option_get();
         //Richiesta vicini
         sprintf(buffer,"%u,%d,%ld,%c",my_addr.s_addr,my_port,current_open_date,option);
-        my_log_print(peer_log,"Invio %c al DS\n",option);
+        my_log_print(ds_log,"Invio %c al DS\n",option);
         sendto(socket,&buffer,strlen(buffer)+1,0,(struct sockaddr*)&ds_addr,ds_addrlen);
         ds_to_read = ds_master;
         timeout.tv_sec = DS_COMUNICATION_LOOP_SLEEP_TIME;
@@ -2695,7 +2730,7 @@ void* ds_comunication_loop(void *arg){
             if(option=='x'){//Richiesta della lista dei vicini
                 my_log_print(ds_log,"Ricevuta lista dei peer:\n %s",buffer);
                 update_neighbors(buffer);
-                my_log_print(peer_log,"Imposto la comunicazione su Refresh");
+                my_log_print(ds_log,"Imposto il messaggio da inviare al DS: 'Refresh'-> 'r'\n");
                 ds_option_set('r');//Il loop passa in modalità sincronizzazione ( refresh )
             }else if(option == 'r'){
                 //printf("Ricevuto \n%s\n",buffer);
@@ -2706,8 +2741,8 @@ void* ds_comunication_loop(void *arg){
                 if(time_recived > get_current_open_date()){//dobbiamo sincronizzarci
                     set_current_open_date(time_recived);
                     close_today_register();
-                    my_log_print(ds_log,"Aperto nuovo registro\n");
-                    my_log_print(peer_log,"Simulo 10 nuove entrate casuali\n");
+                    my_log_print(ds_log,"Aperto nuovo registro : %ld\n",time_recived);
+                    my_log_print(ds_log,"Simulo 10 nuove entrate casuali\n");
                     test_add_entry();   
 
                 }
@@ -2755,7 +2790,7 @@ void serve_peer(int socket_served){
     //printf("operation %c\n",operation);
     my_log_print(peer_log,"Giunta operazione %c con lungezza %d\n",operation,len);
     if(len>0){
-        my_log_print(peer_log,"Allogazione del buffer di lunghezza %d\n",len);
+        my_log_print(peer_log,"Allocazione del buffer di lunghezza %d\n",len);
         buffer = malloc(sizeof(char)*len);
         my_log_print(peer_log,"In attesa del messaggio...\n",len);
         if(recv(socket_served,(void*)buffer,len,0)<0){
@@ -2763,7 +2798,7 @@ void serve_peer(int socket_served){
             perror("Errore in fase di ricezione\n");
             return;
         }
-        my_log_print(peer_log,"Messaggio ricevuto!\n");
+        my_log_print(peer_log,"Messaggio letto correttamente\n");
     }
     switch(operation){
         case 'H': //Nuovo peer (Hello!)
@@ -2771,8 +2806,8 @@ void serve_peer(int socket_served){
             sscanf(buffer,"%d,%u,%d",&peer_id,&peer_addr.s_addr,&peer_port);
             my_log_print(peer_log,"Un nuovo peer si è unito al vicinato! id: %d addr: %u, porta: %d\n",peer_id,peer_addr.s_addr,peer_port);
             add_neighbour(peer_id,socket_served,peer_addr,peer_port);
-            my_log_print(peer_log,"È arrivato un nuovo peer!:\n");
-            neighbors_list_print();
+            //my_log_print(peer_log,"È arrivato un nuovo peer!:\n");
+            //neighbors_list_print();
             break;
         case 'U'://Update
             my_log_print(peer_log,"Gestione di un messaggio di backup da %d\n",socket_served);
@@ -2793,7 +2828,7 @@ void serve_peer(int socket_served){
             break;
         case 'I'://Ignore
             my_log_print(peer_log,"Ricevuto 'Ignora' da %d\n",socket_served);
-            my_log_print(peer_log,"Messaggio ricevuto\n%s\n",buffer);
+            //my_log_print(peer_log,"Messaggio ricevuto\n%s\n",buffer);
             manage_ignore_answer(buffer,socket_served);
             break;
         case 'N'://Not found
@@ -2813,22 +2848,26 @@ void serve_peer(int socket_served){
         case 'B'://bye bye
             my_log_print(peer_log,"Ricevuto un messaggio di addio da %d\n",socket_served);
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
-            my_log_print(peer_log,"Sengalo al DS_thread di richiedere la lista dei peer %d\n",socket_served);
+            my_log_print(peer_log,"Sengalo al DS_thread di richiedere la lista dei peer\n");
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
-            neighbors_list_print();
+            //neighbors_list_print();
             break;
         default:
             //Il messaggio non rispetta i protocolli di comunicazione, rimuovo il peer
             my_log_print(peer_log,"Il peer non rispetta i protocolli di comunicazione, lo elimino dalla lista dei peer\n");
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
-            my_log_print(peer_log,"Sengalo al DS_thread di richiedere la lista dei peer %d\n",socket_served);
+            my_log_print(peer_log,"Sengalo al DS_thread di richiedere la lista dei peer\n");
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
-            neighbors_list_print();
+            //neighbors_list_print();
             break;
     }
-    if(len>0){
-        free(buffer);
+    if(buffer!=NULL){
+        if(strlen(buffer)>0){
+            free(buffer);
+            buffer =NULL;
+        }
     }
+    
     
 }
 
@@ -2841,7 +2880,7 @@ void * tcp_comunication_loop(void *arg){
     socklen_t len;
     struct timeval timeout;
     timeout.tv_usec = 0;
-    my_log_print(peer_log,"Tentativo apertura socket alla porta %d",s_port);
+    my_log_print(peer_log,"Tentativo apertura socket alla porta %d\n",s_port);
     ret = open_tcp_server_socket(&s_socket,&s_addr,s_port);
     if(ret<0){
         perror("Errore nella costruzione della server socket\n");
@@ -2868,7 +2907,7 @@ void * tcp_comunication_loop(void *arg){
                 if(socket_i == s_socket){
                     len = sizeof(peer_addr);
                     peer_socket = accept(s_socket,(struct sockaddr*) &peer_addr,&len);
-                    my_log_print(peer_log,"È arrivato un nuovo peer socket:%d\n",peer_socket);
+                    //my_log_print(peer_log,"È arrivato un nuovo peer socket:%d\n",peer_socket);
                     serve_peer(peer_socket);
                 }else{//Serviamo un peer;
                     my_log_print(peer_log,"Servo il client : %d\n",socket_i);
@@ -2931,7 +2970,6 @@ int main(int argc, char* argv[]){
         my_port = DEFAULT_PORT;
     }
     globals_init();
-    my_log_print(user_log,"Provo a dire %d cose\n",5);
     if(pthread_create(&tcp_comunication_thread,NULL,tcp_comunication_loop,(void*)&my_port)){
         perror("Errore nella creazione del thread\n");
         exit(EXIT_FAILURE);

@@ -29,9 +29,9 @@
 #define PACKET_MASK 0x00000000FFFFFFFF // <3 byte liberi> <1 byte tipo operazione> <4 byte lunghezza pacchetto>
 #define DS_COMUNICATION_LOOP_SLEEP_TIME 2
 #define DEFAULT_SELECT_WAIT_TIME 5;
-#define DEFAULT_PEER_COMUNICATION_LOG_FILENAME "/peers.log"
-#define DEFAULT_DS_COMUNITCATION_LOG_FILENAME "/ds_comunication.log"
-#define DEFAULT_USER_LOG_FILENAME "/user.log"
+#define DEFAULT_PEER_COMUNICATION_LOG_FILENAME "/log/peers.log"
+#define DEFAULT_DS_COMUNITCATION_LOG_FILENAME "/log/ds_comunication.log"
+#define DEFAULT_USER_LOG_FILENAME "/log/user.log"
 #define DEFAULT_DS_THREAD_NAME "DS_Thread"
 #define DEFAULT_PEER_THREAD_NAME "PEER_Thread"
 #define DEFAULT_USER_THREAD_NAME "USER_Thread"

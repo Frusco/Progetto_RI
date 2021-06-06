@@ -13,7 +13,7 @@
 /*
 DISCOVERY SERVER:
 */
-
+//Mutez che gestisce la concorrenzialità sulla time_list 
 pthread_mutex_t timer_mutex;
 
 struct timer_elem{
@@ -27,9 +27,13 @@ struct timer_elem{
 struct timer_elem* timer_list;
 
 
-/*
-Controlla se il peer è nella lista del timer
-*/
+
+/**
+ * @brief  Controlla se il peer è nella lista del timer
+ * @note   
+ * @param  id:int identificativo del peer 
+ * @retval int 1 : presente ; 0 : non presente
+ */
 int timer_list_is_in(int id){
     struct timer_elem* elem;
     elem = timer_list;
@@ -46,12 +50,19 @@ int timer_list_is_in(int id){
 }
 
 /*
-Controlla se il peer è nella lista del timer e lo rimuove da
-quest'ultimo passandolo come valore di ritorno.
+ passandolo come valore di ritorno.
 Questa funzione viene utilizzata:
--Per aggiornare il time_to_live del peer e reinserirlo in lista.
--Per rimuovere il peer definitivamente.
+
 */
+/**
+ * @brief  Controlla se il peer è nella timer_list e lo rimuove da
+           quest'ultima
+ * @note   usato per:
+ *         -Aggiornare il time_to_live del peer e reinserirlo in lista.
+           -Rimuovere il peer definitivamente. 
+ * @param  id:int identificativo del peer da rimuovere
+ * @retval timer_elem* puntatore al timer_elem rimosso
+ */
 struct timer_elem* timer_list_check_and_remove(int id){
     struct timer_elem* cur,*prev,*ret;
     if(!timer_list_is_in(id)) return NULL;
@@ -79,28 +90,30 @@ struct timer_elem* timer_list_check_and_remove(int id){
     if(cur) {
         cur->time_to_live += ret->time_to_live;
     }
-    /*while(cur){
-        cur->time_to_live += ret->time_to_live;
-        cur=cur->next;
-    }*/
     pthread_mutex_unlock(&timer_mutex);
     return ret;
 
 }
 
+/**
+ * @brief  Controlla se la testa della coda timer_list ha time_to_live = 0
+ * @note   
+ * @retval int 1 : timer_elem scaduto , 0 : timer_elem non scaduto
+ */
 int timer_list_head_time_experide(){
     int ret;
     pthread_mutex_lock(&timer_mutex);
     ret = (timer_list->time_to_live==0);
     pthread_mutex_unlock(&timer_mutex);
-   
     return ret;
 }
 
 void remove_peer(int id);
-/*
-Diminuisce di uno il time_to_live dell'elemento in testa a timer_list,
-*/
+/**
+ * @brief  Diminuisce di uno il time_to_live dell'elemento in testa a timer_list
+ * @note   vedi remove_peer , timer_list_head_time_expired
+ * @retval None
+ */
 void timer_list_update(){
     pthread_mutex_lock(&timer_mutex);
     if(timer_list==NULL){
@@ -122,6 +135,11 @@ void timer_list_update(){
     }
 }
 
+/**
+ * @brief  Stampa la timer_list
+ * @note   
+ * @retval None
+ */
 void timer_list_print(){
     struct timer_elem* cur;
     pthread_mutex_lock(&timer_mutex);
@@ -139,6 +157,12 @@ void timer_list_print(){
     pthread_mutex_unlock(&timer_mutex);
 }
 
+/**
+ * @brief  Rimuove dalla lista ( deallocando l'elemento estratto ) dalla timer_list
+ * @note   vedi timer_list_check_and_remove
+ * @param  id:int identificativo del peer 
+ * @retval None
+ */
 void timer_list_delete(int id){
     struct timer_elem* elem;
     elem = timer_list_check_and_remove(id);
@@ -146,7 +170,13 @@ void timer_list_delete(int id){
 }
 
 
-//Aggiorna o aggiunge un timer_elem di id passato come argomento
+//
+/**
+ * @brief  Aggiorna o aggiunge un timer_elem di id passato come argomento
+ * @note   
+ * @param  id:int identificativo del peer
+ * @retval None
+ */
 void timer_list_add(int id){
     struct timer_elem *elem,*cur,*prev;
     elem = timer_list_check_and_remove(id);
@@ -178,21 +208,37 @@ void timer_list_add(int id){
     }
     pthread_mutex_unlock(&timer_mutex);
 }
-
+//mutex per gestire la concorrenza della variabile sync_time
 pthread_mutex_t sync_time_mutex;
 time_t sync_time;
+/**
+ * @brief  Aggiunge un giorno a sync_time
+ * @note   
+ * @retval None
+ */
 void sync_time_add_day(){
     pthread_mutex_lock(&sync_time_mutex);
     //Aggiungo un giorno
     sync_time+= 86400;
     pthread_mutex_unlock(&sync_time_mutex);
 }
+/**
+ * @brief  Setta la variabile sync_time
+ * @note   
+ * @param  t:time_t la nuova data da associare a sync_time
+ * @retval None
+ */
 void sync_time_set(time_t t){
     pthread_mutex_lock(&sync_time_mutex);
     //Aggiungo un giorno
     sync_time=t;
     pthread_mutex_unlock(&sync_time_mutex);
 }
+/**
+ * @brief  Restituisce una copia di sync_time
+ * @note   
+ * @retval ;time_t il valore di sync_time
+ */
 time_t sync_time_get(){
     time_t ret;
     pthread_mutex_lock(&sync_time_mutex);
@@ -200,7 +246,11 @@ time_t sync_time_get(){
     pthread_mutex_unlock(&sync_time_mutex);
     return ret;
 }
-
+/**
+ * @brief  Salva su file il valore di sync_time
+ * @note   guarda SYNC_TIME_PATH in consts per il nome del file
+ * @retval None
+ */
 void sync_time_save(){
     FILE *f;
     pthread_mutex_lock(&sync_time_mutex);
@@ -209,6 +259,11 @@ void sync_time_save(){
     fclose(f);
     pthread_mutex_unlock(&sync_time_mutex);
 }
+/**
+ * @brief  Carica sync_time da file, se non esiste lo genera basandosi sulla data corrente
+ * @note   guarda SYNC_TIME_PATH in consts per il nome del file
+ * @retval time_t il valore di sync_time
+ */
 time_t sync_time_load(){
     FILE *f;
     time_t t;
@@ -278,7 +333,12 @@ int peers_table_size;
 struct peer_des* peers_table; 
 pthread_mutex_t table_mutex;
 
-//Restituisce un puntatore al descritore di peer con l'id passato ( se esiste )
+/**
+ * @brief Restituisce un puntatore al descritore di peer con l'id passato ( se esiste )
+ * @note   
+ * @param  id: identificativo del peer 
+ * @retval peer_des* puntatore al descrittore di peer, NULL se non esiste l'elemento
+ */
 struct peer_des* get_peer_des(int id){
     if(id >= peers_table_size){
         return NULL;
@@ -290,7 +350,13 @@ struct peer_des* get_peer_des(int id){
 }
 
 
-// Stampa le informazioni del peer con l'id passa ( se esiste )
+
+/**
+ * @brief  Stampa le informazioni del peer con l'id passa ( se esiste )
+ * @note   
+ * @param  id:int identificativo del peer
+ * @retval None
+ */
 void peers_table_print_peer(int id){
     struct peer_des* p = get_peer_des(id);
     if(p){
@@ -302,7 +368,12 @@ void peers_table_print_peer(int id){
         printf("\n");
     }
 }
-
+/**
+ * @brief  Stampa la lista dei vicini del peer passato
+ * @note   
+ * @param  id:int identificativo del peer
+ * @retval None
+ */
 void peers_table_print_peer_neighbor(int id){
     pthread_mutex_lock(&table_mutex);
     struct peer_des* p = get_peer_des(id);
@@ -316,7 +387,11 @@ void peers_table_print_peer_neighbor(int id){
     }
     pthread_mutex_unlock(&table_mutex);
 }
-
+/**
+ * @brief  Stampa tutte le informazioni dei peer presenti in rete
+ * @note   guarda peer_table_print_peer
+ * @retval None
+ */
 void peers_table_print_all_peers(){
     pthread_mutex_lock(&table_mutex);
     for(int i = 0 ; i<peers_table_size; i++){
@@ -328,7 +403,13 @@ void peers_table_print_all_peers(){
 /*
 ### GLOBALS INIT E FREE ################################################
 */
+//Gestisce il loop dei thread
 int loop_flag;
+/**
+ * @brief  Inizializza tutte le variabili globali
+ * @note   
+ * @retval None
+ */
 void globals_init(){
     peers_list = NULL;
     peers_list_tail = NULL;
@@ -347,6 +428,11 @@ void globals_init(){
     pthread_mutex_init(&timer_mutex,NULL);
 }
 
+/**
+ * @brief  Dealloca la peers_table
+ * @note   
+ * @retval None
+ */
 void free_peers_table(){
     for(int i = 0 ; i<peers_table_size; i++){
         if(peers_table[i].port == -1) continue;
@@ -355,6 +441,11 @@ void free_peers_table(){
     free(peers_table);
 }
 
+/**
+ * @brief  Dealloca la peers_list
+ * @note   
+ * @retval None
+ */
 void free_peers_list(){
     struct peer_elem* aux;
     while(peers_list!=NULL){
@@ -365,6 +456,11 @@ void free_peers_list(){
     peers_list_tail = NULL;
 }
 
+/**
+ * @brief  Dealloca la timer_list
+ * @note   
+ * @retval None
+ */
 void free_timer_list(){
     struct timer_elem* aux;
     while(timer_list!=NULL){
@@ -373,7 +469,11 @@ void free_timer_list(){
         free(aux);
     }
 }
-
+/**
+ * @brief  Dealloca tutte la variabili globali dinamiche
+ * @note   
+ * @retval None
+ */
 void globals_free(){
     free_peers_list();
     free_peers_table();
@@ -391,7 +491,14 @@ Elementi della struct peer_des
     int  neighbors_vector_size;
     int* neighbors_vector; //Array dinamico degli id dei vicini
 */
-
+/**
+ * @brief  Aggiunge le info di un peer nella peers_table
+ * @note   
+ * @param  i:int indice della tabella ( id del peer )
+ * @param  addr:in_addr address del peer
+ * @param  port:int porta della socket tcp del peer
+ * @retval None
+ */
 void populate_peers_table_row(int i,struct in_addr addr, int port){
     struct peer_des *pd = &peers_table[i];
     pd->addr = addr;
@@ -409,6 +516,14 @@ void populate_peers_table_row(int i,struct in_addr addr, int port){
 Restituisce l'id del peer (indice della tabella dei descrittori di peer) 
 dopo aver allocato il descrittore del nuovo peer
 */
+/**
+ * @brief  Restituisce l'id del peer (indice della tabella dei descrittori di peer) 
+           dopo aver allocato il descrittore del nuovo peer
+ * @note   
+ * @param  addr:in_addr address del peer
+ * @param  port:int porta della socket tcp del peer 
+ * @retval 
+ */
 int peers_table_add_peer(struct in_addr addr, int port){
     int i;
     int backup_peers_table_size;
@@ -442,7 +557,12 @@ Raddoppiamo la sua grandezza moltiplicando per due peers_table_size e usando rea
    pthread_mutex_unlock(&table_mutex);
    return i;
 }
-
+/**
+ * @brief  Rimuove dalla lista il peer di indice i, dealloca la lista dei vicini ( neighbors_vector )
+ * @note   
+ * @param  i:int indice della tabella ( id del peer )
+ * @retval None
+ */
 void peers_table_remove_peer(int i){
     struct peer_des *pd;
     if(i>=peers_table_size){pthread_mutex_unlock(&table_mutex); return;}
@@ -454,9 +574,13 @@ void peers_table_remove_peer(int i){
     pthread_mutex_unlock(&table_mutex);
 }
 
-/*
-Aggiunge un vicino al vettore dinamico dei vicini ( neighbour_vector )
-*/
+/**
+ * @brief  Aggiunge un vicino al vettore dinamico dei vicini ( neighbour_vector )
+ * @note   
+ * @param  id:int id del peer a cui aggiungere il vicino
+ * @param  neighbour_id:int id del nuovo vicino
+ * @retval 
+ */
 int peers_table_add_neighbour(int id , int neighbour_id){
     int i;
     int backup_neighbors_size;
@@ -498,6 +622,13 @@ Raddoppiamo la sua grandezza moltiplicando per due neighbors_vector_size
    return 1;
 }
 
+/**
+ * @brief  Rimuove un vicino dalla lista dei vicini del peer passato
+ * @note   
+ * @param  id:int identificativo del peer
+ * @param  neighbour_id:int identificativo del vicino da rimuovere 
+ * @retval None
+ */
 void peers_table_remove_neighbour(int id, int neighbour_id){
     struct peer_des *pd;
     pthread_mutex_lock(&table_mutex);
@@ -515,7 +646,13 @@ void peers_table_remove_neighbour(int id, int neighbour_id){
     pthread_mutex_unlock(&table_mutex);
 }
 
-// Controlla se il peer id ha come vicino neighbour_id
+/**
+ * @brief  Controlla se il peer id ha come vicino neighbour_id
+ * @note   
+ * @param  id:int identificativo del peer
+ * @param  neighbour_id:int identificativo del vicino
+ * @retval 
+ */
 int peers_table_has_neighbour(int id, int neighbour_id){
 // Se id è uguale a neighbour_id restituisce vero
     if(id == neighbour_id) return 1;
@@ -532,7 +669,13 @@ int peers_table_has_neighbour(int id, int neighbour_id){
     pthread_mutex_unlock(&table_mutex);
     return 0;
 }
-
+/**
+ * @brief  Restituisce l'id del peer basandosi su indirizzo e porta
+ * @note   
+ * @param  addr:in_addr indirizzo del peer
+ * @param  port:int porta della socket tcp del peer
+ * @retval 
+ */
 int get_id_by_ip_port(struct in_addr addr,int port){
     struct peer_des* pd;
     int ret =-1;
@@ -553,9 +696,13 @@ int get_id_by_ip_port(struct in_addr addr,int port){
 ### GESTIONE peers_list ##############################################
 */
 
-/*
-Inserimento in una lista ordinata usando due puntatori
-*/
+/**
+ * @brief  inizializza un peer_elem e lo restituisce
+ * @note   
+ * @param  id:int identificativo del peer 
+ * @param  port:int porta della socket tcp del peer
+ * @retval peer_elem* puntatore al peer_elem allocato
+ */
 struct peer_elem* peer_elem_init(int id,int port){
     struct peer_elem* pe = malloc(sizeof(struct peer_elem));
     pe->id = id;
@@ -564,7 +711,12 @@ struct peer_elem* peer_elem_init(int id,int port){
     pe->prev = NULL;
     return pe;
 }
-
+/**
+ * @brief  Aggiunge un peer_elem alla peers_list
+ * @note   
+ * @param  new_peer:peer_elem* puntatore al peer_elem da inserire in lista
+ * @retval None
+ */
 void peers_list_add(struct peer_elem* new_peer){
     struct peer_elem *peer, *prev_peer;
     peer = peers_list;
@@ -593,6 +745,12 @@ void peers_list_add(struct peer_elem* new_peer){
     }
     pthread_mutex_unlock(&list_mutex);
 }
+/**
+ * @brief  Rimuove un peer_elem dalla peers_list basandosi sull'id
+ * @note   
+ * @param  id:int identificativo del peer da rimuovere
+ * @retval None
+ */
 void peers_list_remove(int id){
     struct peer_elem *peer, *prev_peer;
     pthread_mutex_lock(&list_mutex);
@@ -632,11 +790,16 @@ void peers_list_remove(int id){
 }
 
 /*
-Se il peer in testa alla lista ha meno di due vicini,
-scorro la lista in cerca del primo peer non nella sua lista dei vicini,
-essendo la lista ordinata sarà anche il più vicino al livello di porta
+
 */
 void print_peer_elem(struct peer_elem* pe);
+/**
+ * @brief   Compensa l'eventuale isolamento del peer in testa alla lista
+ * @note    Se il peer in testa alla lista ha meno di due vicini,
+            scorro la lista in cerca del primo peer non nella sua lista dei vicini,
+            essendo la lista ordinata sarà anche il più vicino al livello di porta 
+ * @retval None
+ */
 void fix_head_isolation(){
     pthread_mutex_lock(&list_mutex);
     if(peers_number<2) {pthread_mutex_unlock(&list_mutex);return;}
@@ -655,11 +818,14 @@ void fix_head_isolation(){
     }
     pthread_mutex_unlock(&list_mutex);
 }
-/*
-Se il peer in coda alla lista ha meno di due vicini,
-scorro la lista ( al contrario ) in cerca del primo peer non nella sua lista dei vicini,
-essendo la lista ordinata sarà anche il più vicino al livello di porta
-*/
+
+/**
+ * @brief  Compensa l'eventuale isolamento del peer in coda alla lista
+ * @note    Se il peer in coda alla lista ha meno di due vicini,
+            scorro la lista ( al contrario ) in cerca del primo peer non nella sua lista dei vicini,
+            essendo la lista ordinata sarà anche il più vicino al livello di porta
+ * @retval None
+ */
 void fix_tail_isolation(){
     if(peers_number<2) {pthread_mutex_unlock(&list_mutex);return;}
     if(peers_list_tail == NULL) {pthread_mutex_unlock(&list_mutex);return;}
@@ -679,10 +845,20 @@ void fix_tail_isolation(){
     pthread_mutex_unlock(&list_mutex);
 }
 
-
+/**
+ * @brief  Stampa le informazioni del peer_elem passato
+ * @note   
+ * @param  pe:peer_elem* puntatore al peer_elem da stampare
+ * @retval None
+ */
 void print_peer_elem(struct peer_elem* pe){
     printf("[%d,%d]",pe->id,pe->port);
 }
+/**
+ * @brief  Stampa la peers_list
+ * @note   vedi print_peer_elem
+ * @retval None
+ */
 void peers_list_print(){
     struct peer_elem *peer;
     peer = peers_list;
@@ -707,13 +883,20 @@ void peers_list_print(){
 */
 
 /*
-Aggiunge una nuova riga alla tabbela dei dei descrittori di peer (peers_table)
-restituendo l'indice della tabella (id:int), viene allocato un peer_elem contenente
-l'indice della peer_table e la porta utilizzata per ordinare la lista (peers_list) nella
-quale sarà inserito.
-Effettuato l'inserimento verranno inidividuati i vicini e risolti gli eventuali
-problemi di isolamento della coda e della testa della lista.
+
 */
+/**
+ * @brief  Aggiunge un peer alla rete
+ * @note    Aggiunge una nuova riga alla tabbela dei descrittori di peer (peers_table)
+            restituendo l'indice della tabella (id:int), viene allocato un peer_elem contenente
+            l'indice della peers_table e la porta utilizzata per ordinare la lista (peers_list) nella
+            quale sarà inserito.
+            Effettuato l'inserimento verranno inidividuati i vicini e risolti gli eventuali
+            problemi di isolamento della coda e della testa della lista.
+ * @param  addr:in_addre indirizzo del peer
+ * @param  port:int porta della socket tcp del peer
+ * @retval 
+ */
 int add_peer(struct in_addr addr,int port){
     int id;
     struct peer_elem *pe;
@@ -729,11 +912,17 @@ int add_peer(struct in_addr addr,int port){
     return id;
 }
 /*
-Svuota la riga della peers_table identificata con l'id passato, elimina l'id
-dalla lista dei vicini (neighbors_vector) e elimina il relativo peer_elem dalla
-lista dei peer, ricalcolando i vicini e risolvendo eventuali problemi di 
-isolamento dei peer in testa e coda della lista.
+
 */
+/**
+ * @brief  Rimuove un peer dalla rete
+ * @note    Svuota la riga della peers_table identificata con l'id passato, elimina l'id
+            dalla lista dei vicini (neighbors_vector) e elimina il relativo peer_elem dalla
+            lista dei peer, ricalcolando i vicini e risolvendo eventuali problemi di 
+i           solamento dei peer in testa e coda della lista.
+ * @param  id:int identificativo del peer da rimuovere
+ * @retval None
+ */
 void remove_peer(int id){
     peers_table_remove_peer(id);
     for(int i = 0 ; i<peers_table_size;i++){
@@ -747,7 +936,7 @@ void remove_peer(int id){
 }
 
 /*
-Genera la lista dei vicini di id e restituisce la dimensione della nuova stringa msg allocata
+
 Formato messaggio:
 
 <id richiedente>,<numero di vicini>
@@ -756,6 +945,16 @@ Formato messaggio:
 <id>,<addr>,<porta>
 
 */
+/**
+ * @brief  Genera la lista dei vicini di id e restituisce la dimensione della nuova stringa msg allocata
+ * @note    <id richiedente>,<numero di vicini>
+            <id>,<addr>,<porta>
+            ...
+            <id>,<addr>,<porta>
+ * @param  id:int identificatore del peer
+ * @param  msg:char** puntatore alla stringa 
+ * @retval 
+ */
 uint16_t generate_neighbors_list_message(int id,char** msg){
     pthread_mutex_lock(&table_mutex);
     char aux[250]="";
@@ -782,23 +981,15 @@ uint16_t generate_neighbors_list_message(int id,char** msg){
 
 /*
 Il compito del thread è quello di aspettare richieste dai peer
-e soddisfarle gestendo la peers_list e la peers_table
+e soddisfarle gestendo la peers_list, la peers_table e la timer_list
 Cosa può fare:
 - Aggiungere un peer
 - Rimuovere un peer
 - Inviare la lista dei vicini a un peer
-
-NOTA: è compito del peer contattare il Discovery Server per ottenere
-la lista aggiornata della sua lista dei peer.
-
+- Aggiornare la timer_list
 */
 
-/*
-Formato del messaggio di richiesta da parte del peer
-<ip:in_addr>,<porta:int>
 
-C'è da fare il conto di ID_BUFFER, ora non ho voglia 
-*/
 void thread_test(){
     struct timer_elem* tm;
     int port = 2000;
@@ -819,6 +1010,17 @@ void thread_test(){
     printf("Test finto\n");
 }
 
+/**
+ * @brief  Il compito del thread è quello di aspettare richieste dai peer
+            e soddisfarle gestendo la peers_list, la peers_table e la timer_list.
+ * @note   Cosa può fare:
+            - Aggiungere un peer
+            - Rimuovere un peer
+            - Inviare la lista dei vicini a un peer
+            - Aggiornare la timer_list
+ * @param  arg:void* puntatore agli args ( in questo caso la porta di ascolto della socket udp )
+ * @retval None
+ */
 void* thread_ds_loop(void* arg){
     //buffers
     char buffer[DS_BUFFER];
@@ -886,7 +1088,11 @@ void* thread_ds_loop(void* arg){
     sync_time_save(cur_sync_time);
     pthread_exit(NULL);
 }
-
+/**
+ * @brief  Controlla se è l'ora di chiudere il registro odierno
+ * @note   
+ * @retval None
+ */
 void check_closing_hour(){
     struct tm *tm_close;
     time_t close;
@@ -906,12 +1112,17 @@ void check_closing_hour(){
 }
 
 /*
-Conta i secondi rimanenti al peer prima di essere eliminato,
-elimina i peer con time_to_live uguale a zero
-Il peer rinnova il suo time_to_live inviando un pacchetto apposito al DS
-( gestito quindi dal thread_ds_loop )
-*/
 
+
+*/
+/**
+ * @brief  Conta i secondi rimanenti al peer prima di essere eliminato,
+           elimina i peer con time_to_live uguale a zero
+ * @note   Il peer rinnova il suo time_to_live inviando un pacchetto apposito al DS
+            ( gestito quindi dal thread_ds_loop )
+ * @param  arg: nessun arg gestito ( NULL )
+ * @retval 
+ */
 void * thread_timer_loop(void* arg){
     printf("[Timer_Thread]: ready.\n");
     while(loop_flag){
@@ -928,8 +1139,13 @@ void * thread_timer_loop(void* arg){
 ### USER LOOP  e MAIN ##############################################
 */
 
-//Controlla se il comando passato dall'utente è effettivamente uno di quelli
-//riconosiuti, restituendo l'indice del comando ( -1 se non riconosciuto )
+/**
+ * @brief   Controlla se il comando passato dall'utente è effettivamente uno di quelli
+            riconosiuti, restituendo l'indice del comando ( -1 se non riconosciuto ) 
+ * @note   
+ * @param  command:char* stringa del commando ricevuto
+ * @retval int indice del comando, -1 se il comando non è stato riconosciuto
+ */
 int find_command(char* command){
     char command_list[][SERVER_MAX_COMMAND_SIZE] = SERVER_COMMAND_LIST;
     for(int i = 0; i<SERVER_COMMANDS_NUMBER; i++){
@@ -960,6 +1176,12 @@ void send_exit_packet(int ds_port){
 /*
 Loop che gestisce l'interfaccia utente
 */
+/**
+ * @brief  Loop che gestisce l'interfaccia utente
+ * @note   int port serve per inviare un pacchetto alla socket udp con il comando di interruzione
+ * @param  port:int porta della socket udp in ascolto
+ * @retval None
+ */
 void user_loop(int port){
     char msg[40];
     int id;
@@ -1034,22 +1256,25 @@ int main(int argc, char* argv[]){
     pthread_t service_thread,timer_thread;
     int port;
     void* thread_ret;
+    //Inzializzo le variabili globali
     globals_init();
     if(argc>1){
         port = atoi(argv[1]);
     }else{
         port = DEFAULT_PORT;
     }
-    //thread_timer_loop
+    //Lancio il thread per comunicare con i peer
     if(pthread_create(&service_thread,NULL,thread_ds_loop,(void*)&port)){
         perror("Errore nella creazione del thread\n");
         exit(EXIT_FAILURE);
     }
+    //Lancio il thread del timer per gestire il time_to_live dei peer
     if(pthread_create(&timer_thread,NULL,thread_timer_loop,NULL)){
         perror("Errore nella creazione del thread\n");
         exit(EXIT_FAILURE);
     }
     sleep(1);
+    //Salto alla gestione dell'interfaccia utente
     if(loop_flag) user_loop(port);
     pthread_join(service_thread,&thread_ret);
     pthread_join(timer_thread,&thread_ret);
