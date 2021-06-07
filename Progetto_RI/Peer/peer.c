@@ -87,7 +87,9 @@ struct entries_register{
     time_t creation_date;
     FILE *f;
     char *path;
+    //Indica se il registro è aperto
     int is_open;
+    //Indica se il registro è completo
     int is_completed;
     unsigned int count;
     struct entry* entries;
@@ -168,7 +170,11 @@ void cur_FILE_request_free(){
     free(cur_FILE_request);
     cur_FILE_request = NULL;
 }
-
+/**
+ * @brief  Invia ai vicini la richiesta del file contenuta in cur_FILE_request
+ * @note   
+ * @retval None
+ */
 void send_FILE_request(){
     uint64_t first_packet=0; // contiene la lunghezza del prossimo messaggio e del codice
     uint32_t len=0; // lunghezza messaggio
@@ -287,8 +293,15 @@ int flooding_list_all_checked(struct flooding_mate *fm);
 int flooding_list_check_flooding_mate(struct flooding_mate *fm,int id,int socket);
 struct neighbour* get_neighbour_by_socket(int socket);
 void send_request_to_all(struct request *r,int *avoid_socket);
+/**
+ * @brief  Gestisce la risposta del peer per FILE not found, se tutti i vicini hanno risposto in modo negativo, effettuo il flooding per ottenere i dati
+ * @note   Abbiamo inviato la richiesta di un file, ma ci è giunta una risposta negativa
+ * @param  socket_served:int la socket che stiamo servendo
+ * @retval None
+ */
 void manage_FILE_not_found(int socket_served){
     struct neighbour *n;
+    //Ci è giunta la risposta di una File_request che non esiste più, ignoro ed esco.
     if(cur_FILE_request==NULL)return;
     n = get_neighbour_by_socket(socket_served);
     flooding_list_check_flooding_mate(cur_FILE_request->fm,n->id,socket_served);
@@ -299,6 +312,13 @@ void manage_FILE_not_found(int socket_served){
     }
 }
 
+/**
+ * @brief  Gestisce la risposta del peer per FILE found, stampando il risultato a schermo
+ * @note   
+ * @param  buffer:char* la stringa contenente la risposta 
+ * @param  socket_served:int la socket che stiamo servendo ( e che ci ha fornito la risposta ) 
+ * @retval None
+ */
 void manage_FILE_found(char* buffer,int socket_served){
     struct neighbour *n;
     char* path;
@@ -426,6 +446,12 @@ int flooding_list_check_flooding_mate(struct flooding_mate *fm,int id,int socket
     return 0;
 }
 
+/**
+ * @brief  Stampa la flooding list della lista passata
+ * @note   
+ * @param  fm:flooding_mate* lista dei flooding_mate 
+ * @retval None
+ */
 void flooding_list_print(struct flooding_mate* fm){
     printf("Flooding list:\n");
     while(fm){
@@ -435,6 +461,12 @@ void flooding_list_print(struct flooding_mate* fm){
     printf("\n");
 }
 
+/**
+ * @brief  Aggiunge la request alla requestes_list
+ * @note   
+ * @param  *e:request, la richiesta da inserire in lista 
+ * @retval restituisce sempre 1
+ */
 int requestes_list_add(struct request *e){
     struct request *cur;
     struct request *prev;
@@ -454,6 +486,13 @@ int requestes_list_add(struct request *e){
     return 1;
 }
 
+/**
+ * @brief  Restituisce la richiesta  identificandola per id del peer e data
+ * @note   
+ * @param  t:time_t la data della request
+ * @param  id:int identificatore del peer che ha effettuato la richiesta 
+ * @retval request* puntatore alla request, NULL se non esiste
+ */
 struct request* requestes_list_get(time_t t,int id){
     struct request *cur;
     cur = requestes_list;
@@ -464,6 +503,11 @@ struct request* requestes_list_get(time_t t,int id){
     return NULL;
 }
 
+/**
+ * @brief  Dealloca la requestes_list
+ * @note   
+ * @retval None
+ */
 void requestes_list_free(){
     struct request *r;
     struct flooding_mate *fm;
@@ -479,6 +523,12 @@ void requestes_list_free(){
     }
 }
 
+/**
+ * @brief  Data una lista di entry dello stesso tipo, elabora il totale
+ * @note   Non effettua il controllo sul tipo ( type )
+ * @param  *e:entry lista delle entry 
+ * @retval char* stringa contentente il totale
+ */
 char* elab_totale(struct entry *e){
     char *msg;
     char aux[256];
@@ -508,6 +558,12 @@ char* elab_totale(struct entry *e){
     return msg;
 }
 void registers_list_print();
+/**
+ * @brief  Data una lista di entry dello stesso tipo, elabora il totale
+ * @note   Non effettua il controllo sul tipo ( type )
+ * @param  *e:entry lista delle entry 
+ * @retval char* stringa contentente la variazione
+ */
 char* elab_variazione(struct entry *e){
     char *msg;
     char aux[1024];
@@ -559,6 +615,12 @@ char* elab_variazione(struct entry *e){
 }
 
 struct entries_register* get_register_by_creation_date(time_t cd);
+/**
+ * @brief  Data una request, ne elabora il risultato come stringa
+ * @note   vedi elab_variazione ed elab_totale
+ * @param  *r:request puntatore alla richiesta
+ * @retval char* stringa contentente il risultato
+ */
 char* get_elab_result_as_string(struct request *r){
     char * msg;
     struct entries_register *er;
@@ -624,10 +686,10 @@ char* get_elab_result_as_string(struct request *r){
 }
 
 /**
- * @brief  Elabora la richiesta
+ * @brief  Elabora la richiesta salvando il risultato su file
  * @note   
  * @param  *r:request richiesta da elaborare 
- * @retval path del file elaborato
+ * @retval char* path del file elaborato
  */
 char* elab_request(struct request *r){
     FILE *f;
@@ -656,6 +718,11 @@ char* elab_request(struct request *r){
     return path;
 }
 
+/**
+ * @brief  Stampa le informazioni della richiesta
+ * @note   
+ * @retval None
+ */
 void requestes_list_print(){
     struct request *cur;
     cur = requestes_list;
@@ -716,7 +783,13 @@ int entriescmp(struct entry* x,struct entry* y){
     if(x->timestamp.tv_nsec>y->timestamp.tv_nsec) return 1;
     return 0; //sono uguali
 }
-
+/**
+ * @brief  Inizializza una entry con i parametri passati
+ * @note   
+ * @param  type:char typo di entry ( t: tampone , n: nuovo caso) 
+ * @param  quantity:int quantità da registrare 
+ * @retval entry* puntatore alla entry allocata
+ */
 struct entry* entry_init(char type,long quantity){
     struct entry* e;
     if(type!='n' && type!='t') return NULL; //type non valido
@@ -781,6 +854,11 @@ struct entries_register* get_open_register(){
 }
 
 void registers_list_print();
+/**
+ * @brief  Restituisce l'ultimo registro chiuso
+ * @note   vedi add_new_request
+ * @retval entries_register* puntatore al registro
+ */
 struct entries_register* get_last_closed_register(){
     struct entries_register* cur;
     struct entries_register* prev;
@@ -840,7 +918,12 @@ int create_entry(char type, unsigned int quantity){
     e->timestamp.tv_sec+= 7200; //Noi siamo avanti 2 ore rispetto UTC
     return add_entry(e);
 }
-
+/**
+ * @brief  Aggiunge una  un entries_register alla registers_list
+ * @note   vedi manage_register_backup , load_register , open_today_register
+ * @param  *er:entries_register puntatore al registro da inserire in lista 
+ * @retval 
+ */
 int registers_list_add(struct entries_register *er){
     struct entries_register *cur;
     struct entries_register *prev;
@@ -863,6 +946,11 @@ int registers_list_add(struct entries_register *er){
     return 1;
 }
 
+/**
+ * @brief  dealloca tutti i registri e relative entries
+ * @note   
+ * @retval None
+ */
 void registers_list_free(){
     struct entries_register *cur;
     struct entries_register *prev;
@@ -881,7 +969,11 @@ void registers_list_free(){
         free(prev);
     }
 }
-
+/**
+ * @brief  Stampa la lista dei registri
+ * @note   
+ * @retval None
+ */
 void registers_list_print(){
     struct entries_register *cur;
     struct entry *e_cur;
@@ -915,6 +1007,14 @@ void neighbors_list_print(){
 }
 
 int send_greeting_message(struct neighbour* n);
+/**
+ * @brief  Alloca e inizializza un nuovo vicino aprendo una connessione tcp con quest'ultimo
+ * @note   
+ * @param  id:int id del vicino 
+ * @param  addr:in_addr indirizzo del vicino  
+ * @param  port:int la porta della socket tcp del vicino 
+ * @retval 
+ */
 struct neighbour* neighbour_init_and_connect(int id,struct in_addr addr,int port){
     struct neighbour *n = malloc(sizeof(struct neighbour));
     n->id = id;
@@ -1065,8 +1165,13 @@ struct neighbour* add_neighbour(int id,int socket,struct in_addr addr,int port) 
    // neighbors_list_print();
     return n;
 }
-
-char* get_file_name(char*path){
+/**
+ * @brief  Dato un path come stringa, restituisce il nome del file
+ * @note   vedi load_register
+ * @param  path:char*  
+ * @retval char* il nome del file come stringa
+ */
+char* get_file_name(char* path){
     char *file_name;
     int s_start = strlen(path);
     int s_end = strlen(path);
@@ -1125,7 +1230,12 @@ struct entries_register* open_today_register(){
     strcat(er->path,".txt");
     return er;
 }
-
+/**
+ * @brief  Alloca e inizializza un registro chiuso in memoria e lo restituisce
+ * @note   vedi manage_register_backup
+ * @param  cd:time_t 
+ * @retval entries_register* puntatore al registro inizializzato
+ */
 struct entries_register* init_closed_register(time_t cd){
     char filename[20];
     struct entries_register  *er;
@@ -1201,7 +1311,11 @@ void set_current_open_date(time_t new_open_date){
     current_open_date = new_open_date;
     pthread_mutex_unlock(&register_mutex);
 }
-
+/**
+ * @brief  Restituisce la data del registro aperto
+ * @note   
+ * @retval timet_t copia della data
+ */
 time_t get_current_open_date(){
     time_t ret;
     pthread_mutex_lock(&register_mutex);
@@ -1258,6 +1372,12 @@ struct entries_register* load_register(char* path){
     return er;
 }
 
+/**
+ * @brief  
+ * @note   
+ * @param  buffer: 
+ * @retval 
+ */
 int update_register_by_remote_string(char* buffer){
     struct entries_register *er;
     struct entry *e;
@@ -1297,10 +1417,10 @@ int update_register_by_remote_string(char* buffer){
 }
 
 /**
- * @brief  prove
- * @note   prova note
+ * @brief  Restituisce il vicino fornendo la socket
+ * @note   
  * @param  socket:int la Socket del vicino richiesto
- * @retval struct neighbour* che rappresenta il vicino, NULL se non esiste.
+ * @retval neighbour* che punta il vicino, NULL se non esiste.
  */
 struct neighbour* get_neighbour_by_socket(int socket){
     struct neighbour*cur;
@@ -1381,7 +1501,11 @@ struct sockaddr ds_addr;
 /*
 ### GLOBALS INIT E FREE #####################
 */
-
+/**
+ * @brief  Crea le cartelle del peer 
+ * @note   
+ * @retval None
+ */
 void generate_work_folders(){
     char path[50];
     int result;
@@ -1405,7 +1529,11 @@ void generate_work_folders(){
         printf("Cartella %s creata\n",my_log_path);
     }
 }
-
+/**
+ * @brief  Inizializza la registers_list leggendo i file presenti nella cartella del peer
+ * @note   
+ * @retval None
+ */
 void registers_list_init(){
     DIR *d;
     struct dirent *dir;
@@ -1430,7 +1558,11 @@ void registers_list_init(){
   if(er==NULL){er = open_today_register();}
   current_open_date = er->creation_date;
 }
-
+/**
+ * @brief  Alloca e inizializza le strutture dati per i log
+ * @note   
+ * @retval None
+ */
 void logs_init(){
     char* path;
     char* name;
@@ -1462,7 +1594,11 @@ void logs_init(){
     free(name);
 
 }
-
+/**
+ * @brief  Dealloca le strutture dati dei log
+ * @note   
+ * @retval None
+ */
 void logs_free(){
     my_log_free(ds_log);
     my_log_free(peer_log);
@@ -1640,7 +1776,7 @@ struct request* add_new_request(char rt, char t, char* dates){
 
 /**
  * @brief  Inserisce 10 entry di prova nel registro aperto
- * @note   
+ * @note   vedi user_loop e ds_comunication_loop
  * @retval None
  */
 void test_add_entry(){
@@ -1812,9 +1948,6 @@ void user_loop(){
                 }
                 cur_FILE_request_set(r);
                 send_FILE_request();
-                //Creo un FILE_request e attendo.
-                //send_request_to_all(r,NULL);
-                //requestes_list_print();
                 break;
             //__esc__
             case 4:
@@ -2243,7 +2376,12 @@ end_req_to_all:
 }
 
 
-
+/**
+ * @brief  Controlla se il risultato della richiesta è già presente come file
+ * @note   
+ * @param  request*r: la richiesta della quale cerchiamo la richiesta
+ * @retval char* stringa contenente il risultato, oppure NULL se non presente
+ */
 char* get_result_if_exist(struct request*r){
     char file_name[128];
     char* msg;
@@ -2275,7 +2413,7 @@ char* get_result_if_exist(struct request*r){
 /**
  * @brief  Invia i dati richiesti da una socket alla ret_socket
  * @note   
- * @param  *r: 
+ * @param  *r:request la richiesta 
  * @retval None
  */
 void send_request_data(struct request *r){
@@ -2333,7 +2471,12 @@ req_end:
 }
 
 
-
+/**
+ * @brief  Setta tutti i registri della lista come completi
+ * @note   
+ * @param  *r:request la lista dei registri da flaggare come completi 
+ * @retval None
+ */
 void check_all_registers_as_completed(struct request *r){
     struct entries_register *er;
     if(registers_list == NULL) return;
@@ -2518,7 +2661,12 @@ int manage_ignore_answer(char* buffer, int socket){
     }
     return 1;
 }
-
+/**
+ * @brief  Cerca un registro nella registers_list e la restituisce
+ * @note   
+ * @param  cd:time_t data del registro che cerchiamo 
+ * @retval entries_register* puntatore al registro trovato, NULL se non esiste
+ */
 struct entries_register* get_register_by_creation_date(time_t cd){
     struct entries_register* er = registers_list;
     while(er){
@@ -2532,7 +2680,7 @@ struct entries_register* get_register_by_creation_date(time_t cd){
  * @brief  Aggiunge le entry che sono arrivate tramite un messaggio di backup
  * @note   
  * @param  msg:char* il messaggio ricevuto
- * @retval 1 almeno un inserimento, 0 nessun inserimento
+ * @retval int 1 almeno un inserimento, 0 nessun inserimento
  */
 int manage_register_backup(char *msg){
     time_t cd;
@@ -2601,9 +2749,9 @@ DS formato messaggio
 
 
 /**
- * @brief  
- * @note   
- * @param  msg:char* stringa contenente  
+ * @brief  Aggiorna la lista dei vicini
+ * @note   vedi ds_comunication_loop
+ * @param  msg:char* stringa contenente la lista dei vicini
  * @retval None
  */
 void update_neighbors(char* msg){
@@ -2870,7 +3018,12 @@ void serve_peer(int socket_served){
     
     
 }
-
+/**
+ * @brief  Loop con il quale i peer comunicano fra loro
+ * @note   
+ * @param  *arg:void porta della server socket da aprire 
+ * @retval 
+ */
 void * tcp_comunication_loop(void *arg){
     int peer_socket;
     struct sockaddr_in s_addr;
