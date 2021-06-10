@@ -1,5 +1,7 @@
-#include "../consts/const.h"
+#include "../consts/socket_consts.h"
+#include "../consts/ds_consts.h"
 #include "../libs/my_sockets.h"
+#include "../libs/my_logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
@@ -13,7 +15,11 @@
 /*
 DISCOVERY SERVER:
 */
-//Mutez che gestisce la concorrenzialità sulla time_list 
+//Mutex che gestisce la concorrenzialità sulla time_list 
+struct my_log *ds_log;
+struct my_log *user_log;
+struct my_log *timer_log;
+
 pthread_mutex_t timer_mutex;
 
 struct timer_elem{
@@ -49,11 +55,6 @@ int timer_list_is_in(int id){
     return 0;
 }
 
-/*
- passandolo come valore di ritorno.
-Questa funzione viene utilizzata:
-
-*/
 /**
  * @brief  Controlla se il peer è nella timer_list e lo rimuove da
            quest'ultima
@@ -103,6 +104,7 @@ struct timer_elem* timer_list_check_and_remove(int id){
 int timer_list_head_time_experide(){
     int ret;
     pthread_mutex_lock(&timer_mutex);
+    if(!timer_list) return 0;
     ret = (timer_list->time_to_live==0);
     pthread_mutex_unlock(&timer_mutex);
     return ret;
@@ -115,23 +117,25 @@ void remove_peer(int id);
  * @retval None
  */
 void timer_list_update(){
+    my_log_print(timer_log,"Controllo la timer_list...\n");
     pthread_mutex_lock(&timer_mutex);
     if(timer_list==NULL){
+        my_log_print(timer_log,"La timer list è vuota!\n");
         pthread_mutex_unlock(&timer_mutex);
         return;
     }
+    my_log_print(timer_log,"Decremento l'elemento in testa ID:%d TTL:%d\n",timer_list->id,timer_list->time_to_live);
     timer_list->time_to_live--;
     pthread_mutex_unlock(&timer_mutex);
     /*
     Fintanto che gli elementi hanno time_to_live uguale a 0
     gli elimino dalla lista.
     */
+    my_log_print(timer_log,"Controllo i TTL scaduti\n");
     while(timer_list_head_time_experide()){
-        sleep(1);
-        remove_peer(timer_list->id);
-        if(timer_list == NULL){ 
-            break;
-        }   
+        //sleep(1);
+        my_log_print(timer_log,"ID:%d ha TTL 0, rimuvo il peer\n",timer_list->id);
+        remove_peer(timer_list->id); 
     }
 }
 
@@ -403,6 +407,46 @@ void peers_table_print_all_peers(){
 /*
 ### GLOBALS INIT E FREE ################################################
 */
+void logs_init(){
+    char* path;
+    char* name;
+    name = malloc(strlen(DEFAULT_DS_THREAD_NAME)+1);
+    strcpy(name,DEFAULT_DS_THREAD_NAME);
+    path = malloc(strlen(DEFAULT_DS_COMUNITCATION_LOG_FILENAME)+1);
+    
+    strcpy(path,DEFAULT_DS_COMUNITCATION_LOG_FILENAME);
+    ds_log = my_log_init(path,name);
+    free(path);
+    free(name);
+
+    name = malloc(strlen(DEFAULT_TIMER_THREAD_NAME)+1);
+    strcpy(name,DEFAULT_TIMER_THREAD_NAME);
+    path = malloc(strlen(DEFAULT_TIMER_COMUNICATION_LOG_FILENAME)+1);
+    
+    strcpy(path,DEFAULT_TIMER_COMUNICATION_LOG_FILENAME);
+    timer_log = my_log_init(path,name);
+    free(path);
+    free(name);
+
+    name = malloc(strlen(DEFAULT_USER_THREAD_NAME)+1);
+    strcpy(name,DEFAULT_USER_THREAD_NAME);
+    path = malloc(strlen(DEFAULT_USER_LOG_FILENAME)+1);
+    
+    strcpy(path,DEFAULT_USER_LOG_FILENAME);
+    user_log = my_log_init(path,name);
+    free(path);
+    free(name);
+
+}
+void logs_free(){
+    my_log_free(ds_log);
+    my_log_free(timer_log);
+    my_log_free(user_log);
+}
+
+
+
+
 //Gestisce il loop dei thread
 int loop_flag;
 /**
@@ -426,6 +470,7 @@ void globals_init(){
     pthread_mutex_init(&list_mutex,NULL);
     pthread_mutex_init(&table_mutex,NULL);
     pthread_mutex_init(&timer_mutex,NULL);
+    logs_init();
 }
 
 /**
@@ -477,6 +522,8 @@ void free_timer_list(){
 void globals_free(){
     free_peers_list();
     free_peers_table();
+    free_timer_list();
+    logs_free();
 }
 
 /*
@@ -1038,14 +1085,15 @@ void* thread_ds_loop(void* arg){
     time_t time_recived;
     time_t cur_sync_time;
     int id;
-    printf("prima di loaf");
+    my_log_print(ds_log,"Apertura della socket alla porta: %d\n",port);
     cur_sync_time = sync_time_load();
-    printf("dopo di loaf");
     if(open_udp_socket(&ds_socket,&ds_addr,port)){
         perror("[DS_Thread]: Impossibile aprire socket");
+        my_log_print(ds_log,"Impossibile aprire la socket alla porta: %d, chiusura in corso...\n",port);
         loop_flag = 0;
         pthread_exit(NULL);
     }
+    my_log_print(ds_log,"Socket aperta!\n");
     printf("[DS_Thread]: Socket UDP aperta alla porta: %d\n",port);
     peer_addrlen = sizeof(peer_addr);
     //thread_test();
@@ -1053,39 +1101,55 @@ void* thread_ds_loop(void* arg){
         
         if(recvfrom(ds_socket,buffer,DS_BUFFER,0,(struct sockaddr*)&peer_addr,&peer_addrlen)<0){
             perror("[DS_Thread]: Errore nella ricezione");
+            my_log_print(ds_log,"Errore nella ricezione del pacchetto\n");
             continue;
         }
         if(strcmp(buffer,"exit")==0){ 
             printf("[DS_Thread]: Ricosciuto comando di uscita\n");
+            my_log_print(ds_log,"Riconosciuto comando di uscita\n");
             continue;
         }
+        my_log_print(ds_log,"Messaggio ricevuto: %s\n",buffer);
         sscanf(buffer,"%u,%d,%ld,%c",&peer_in_addr.s_addr,&peer_port,&time_recived,&option);
         id = get_id_by_ip_port(peer_in_addr,peer_port);
         if(id==-1){//nuovo utente
             id = add_peer(peer_in_addr,peer_port);
+            my_log_print(ds_log,"Nuovo utente, id associato: %d \n",id);
         }else{//Refresha il time_to_live del peer
+            my_log_print(ds_log,"Aggiorno TTL di %d\n",id);
             timer_list_add(id);
         }
         if(option =='r'){//Segnale di sincronizzazione
+            my_log_print(ds_log,"Arrivato un messaggio di sincronizzazione\n");
             cur_sync_time = sync_time_get();
             if(cur_sync_time>time_recived){//Informo che necessita sincronizzarsi
+                my_log_print(ds_log,"%d non è sincronizzato, invio la sync_time\n",id);
                 sprintf(buffer,"%ld",cur_sync_time);
                 sendto(ds_socket,buffer,(strlen(buffer)+1),0,(struct sockaddr*)&peer_addr,peer_addrlen);
-            }else if(cur_sync_time<time_recived){
+            }else{
+                my_log_print(ds_log,"%d è già sincronizzato, non invio niente\n",id);
+            }
+                /*else if(cur_sync_time<time_recived){
                 sync_time_set(time_recived);
                 printf("Aggiorno la data sync_time! %ld\n",sync_time);
-            }
+            }*/
         }else if(option == 'x'){// Se x richiede anche la lista dei vicini
+            my_log_print(ds_log,"%d richiede la lista dei suoi vicini\n",id);
             msg_len = generate_neighbors_list_message(id,&msg);
+            my_log_print(ds_log,"Il messaggio che invierò a %d:\n%s\n",id,msg);
             sendto(ds_socket,msg,msg_len,0,(struct sockaddr*)&peer_addr,peer_addrlen);
         }else if(option == 'b'){// Bye Bye message, rimuovo il peer
+            my_log_print(ds_log,"%d ci saluta, lo elimino dalla rete\n",id);
             remove_peer(id);
         }
         
          
     }
+    my_log_print(ds_log,"Chiusura della socket\n");
     close(ds_socket);
+    my_log_print(ds_log,"Salvo sync_time\n");
     sync_time_save(cur_sync_time);
+    my_log_print(ds_log,"FINE\n");
     pthread_exit(NULL);
 }
 /**
@@ -1097,6 +1161,7 @@ void check_closing_hour(){
     struct tm *tm_close;
     time_t close;
     time_t now;
+    my_log_print(timer_log,"Controllo se è l'ora di chiudere\n");
     time(&now);
     close = sync_time_get();
     tm_close = localtime(&close);
@@ -1105,9 +1170,12 @@ void check_closing_hour(){
     close = mktime(tm_close);
     //printf("%s,%s\n",ctime(&now),ctime(&close));
     if(now>=close){
-        printf("close = %s",ctime(&close));
-        printf("now is %s",ctime(&now));
+        my_log_print(timer_log,"Orario di chiusura = %s\n",ctime(&close));
+        my_log_print(timer_log,"Orario di adesso = %s\n",ctime(&now));
+        my_log_print(timer_log,"Aggiorno sync_time aggiungendo un giorno!\n",ctime(&close));
         sync_time_add_day();
+    }else{
+        my_log_print(timer_log,"Niente da aggiornare...\n");
     }
 }
 
@@ -1125,11 +1193,13 @@ void check_closing_hour(){
  */
 void * thread_timer_loop(void* arg){
     printf("[Timer_Thread]: ready.\n");
+    my_log_print(timer_log,"Pronto\n");
     while(loop_flag){
         sleep(1);
         timer_list_update();
         check_closing_hour();
     }
+    my_log_print(timer_log,"Chiuso\n");
     printf("[Timer_thread]: chiuso\n");
     return(NULL);
 }
@@ -1154,7 +1224,13 @@ int find_command(char* command){
     return -1;
 }
 
-//Sveglio il thread in ascolto per farlo uscire dal loop
+
+/**
+ * @brief Sveglia il thread in ascolto per farlo uscire dal loop 
+ * @note   
+ * @param  ds_port:int porta della socket udp
+ * @retval None
+ */
 void send_exit_packet(int ds_port){
     char msg[5] = "exit";
     int socket;
@@ -1188,6 +1264,7 @@ void user_loop(int port){
     int args_number;
     int command_index;
     char args[2][SERVER_MAX_COMMAND_SIZE];
+    my_log_print(user_log,"Stampo messaggio di benvenuto...\n");
     printf(SERVER_WELCOME_MSG);
     while(loop_flag){
         printf(">> ");
@@ -1195,6 +1272,7 @@ void user_loop(int port){
         args_number = sscanf(msg,"%s %s",args[0],args[1]);
         //args_number = scanf("%s",args[0],args[1]);
         // arg_len = my_parser(&args,msg);
+        my_log_print(user_log,"Stringa utente: %s\n",msg);
         if(args_number>0){
             command_index = find_command(args[0]);
         }else{
@@ -1203,14 +1281,17 @@ void user_loop(int port){
         switch(command_index){//Gestione dei comandi riconosciuti
             //__help__
             case 0:
+                my_log_print(user_log,"Riconosciuto comando Help\n");
                 printf(SERVER_HELP_MSG);
                 break;
             //__showpeers__
             case 1:
+                my_log_print(user_log,"Riconosciuto comando Showpeers\n");
                 peers_list_print();
                 break;
             //__showneighbor__
             case 2:
+                my_log_print(user_log,"Riconosciuto comando Showneighbor\n");
                 if(args_number < 2){
                     printf("Manca l'ID\n");
                     break;
@@ -1223,18 +1304,25 @@ void user_loop(int port){
             break;
             //__esc__
             case 3:
+                my_log_print(user_log,"Riconosciuto comando Esc\n");
+                my_log_print(user_log,"Setto loop_flag a 0\n");
                 loop_flag = 0;
                 printf("Chiusura in corso...\n");
+                my_log_print(user_log,"Invio il pacchetto di uscita alla socket udp\n");
                 send_exit_packet(port);
                 sleep(1);
             break;
             //__showpeersinfo__
             case 4:
+                my_log_print(user_log,"Riconosciuto comando Showpeersinfo\n");
                 timer_list_print();
                 //peers_table_print_all_peers();
             break;
+            //__add_day__
             case 5:
+                my_log_print(user_log,"Riconosciuto comando Sync_time add day\n");
                 printf("Segnalazione in corso...");
+                my_log_print(user_log,"Aggiungo un giorno al sync_time\n");
                 sync_time_add_day();
                 sleep(1);
                 printf("Fatto!\n");
@@ -1242,6 +1330,7 @@ void user_loop(int port){
             break;
             //__comando non riconosciuto__
             default:
+                my_log_print(user_log,"Nessun comando riconosciuto, stampo errore\n");
                 printf("Comando non riconosciuto!\n");
             break;
         }
@@ -1276,8 +1365,11 @@ int main(int argc, char* argv[]){
     sleep(1);
     //Salto alla gestione dell'interfaccia utente
     if(loop_flag) user_loop(port);
+    my_log_print(user_log,"In attesa del Service Thread\n");
     pthread_join(service_thread,&thread_ret);
+    my_log_print(user_log,"In attesa del Timer Thread\n");
     pthread_join(timer_thread,&thread_ret);
+    my_log_print(user_log,"FINE\n");
     globals_free();
     printf("Ciao, ciao!\n");
 }

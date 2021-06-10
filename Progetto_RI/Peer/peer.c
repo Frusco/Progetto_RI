@@ -1,5 +1,6 @@
 
-#include "../consts/const.h"
+#include "../consts/socket_consts.h"
+#include "../consts/peer_consts.h"
 #include "../libs/my_sockets.h"
 #include "../libs/my_logger.h"
 #include <stdio.h>
@@ -1211,6 +1212,7 @@ struct entries_register* open_today_register(){
     today = mktime(timeinfo);
     //printf("%s",ctime(&today));
     er->count=0;
+    er->is_completed=0;
     er->entries = NULL;
     er->is_open = 1;
     er->next = NULL;
@@ -1291,7 +1293,7 @@ void close_today_register_file(){
 void close_today_register(){
     struct entries_register *er;
     pthread_mutex_lock(&register_mutex);
-close_loop:
+close_loop://Recupero i giorni giorni persi aprendo e chiudendo i registri
     close_today_register_file();
     er = open_today_register();
     //Mi sincronizzo con gli altri peer
@@ -1776,7 +1778,7 @@ struct request* add_new_request(char rt, char t, char* dates){
 
 /**
  * @brief  Inserisce 10 entry di prova nel registro aperto
- * @note   vedi user_loop e ds_comunication_loop
+ * @note   vedi user_loop e ds_comunicatio    n_loop
  * @retval None
  */
 void test_add_entry(){

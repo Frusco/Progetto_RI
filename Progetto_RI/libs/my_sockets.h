@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include "../consts/const.h"
+#include "../consts/socket_consts.h"
 
 
 int open_tcp_server_socket(int *socket_id,struct sockaddr_in *socket_des,int port);
