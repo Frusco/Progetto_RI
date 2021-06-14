@@ -31,3 +31,4 @@ clean:
 	rm *.o
 	rm -r __*
 	rm ds_*.log
+	rm ds_sync_time.txt

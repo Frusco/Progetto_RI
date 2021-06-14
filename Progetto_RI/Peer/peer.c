@@ -49,7 +49,7 @@ fd_set to_read;
 //Mutex per garantire mutualità esclusiva a agli fd_set
 pthread_mutex_t fd_mutex;
 ////Mutex per garantire mutualità esclusiva al char contentente l'opzione da richiede al DS
-pthread_mutex_t ds_mutex;
+pthread_mutex_t set_get_mutex;
 pthread_mutex_t register_mutex;
 pthread_t ds_comunication_thread;
 pthread_t tcp_comunication_thread;
@@ -142,11 +142,15 @@ struct flooding_mate* init_flooding_list(int avoid_socket);
  */
 int cur_FILE_request_set(struct request* r){
     char aux[128];
+    int len;
     if(cur_FILE_request) return 0;
     cur_FILE_request = malloc(sizeof(struct FILE_request));
+    //Copio la request per iniziare il flooding in caso di fallimento di ricevere il file
     cur_FILE_request->r = r;
-    sprintf(aux,"/%c%c-%ld_%ld.res",r->req_type,r->entry_type,r->date_start,r->date_end);
-    cur_FILE_request->file_name = malloc(strlen(aux)+1);
+    //Costruisco il nome del file che cerchiamo
+    len = sprintf(aux,"/%c%c-%ld_%ld.res",r->req_type,r->entry_type,r->date_start,r->date_end);
+    aux[len]='\0';
+    cur_FILE_request->file_name = malloc(len+1);
     strcpy(cur_FILE_request->file_name,aux);
     cur_FILE_request->fm = init_flooding_list(-1);
     return 1;
@@ -195,6 +199,7 @@ void send_FILE_request(){
     first_packet = operations;
     first_packet = first_packet<<32 | len;
     len = ntohl(len);
+    my_log_print(user_log,"FILE richiesto: %s\n",cur_FILE_request->file_name);
     while(n){
         if(send(n->socket,(void*)&first_packet,sizeof(first_packet),0)<0){
                 perror("Errore in fase di invio");
@@ -336,7 +341,7 @@ void manage_FILE_found(char* buffer,int socket_served){
     my_log_print(peer_log,"Path = %s len %ld\n",path,sizeof(path));
     my_log_print(peer_log,"lunghezza buffer = %ld\n",strlen(buffer));
     my_log_print(peer_log,"Elaborato salvato in: %s\n",path);
-    my_log_print(peer_log,"File_name = %s",cur_FILE_request->file_name+1);
+    my_log_print(peer_log,"File_name = %s\n",cur_FILE_request->file_name+1);
     f = fopen(path,"wb");
     if(f==NULL){
         printf("Errore nella fopen con path= %s",path);
@@ -488,6 +493,33 @@ int requestes_list_add(struct request *e){
 }
 
 /**
+ * @brief  Aggiunge la request alla requestes_list
+ * @note   
+ * @param  *e:request, la richiesta da inserire in lista 
+ * @retval restituisce sempre 1
+ */
+int requestes_list_remove(struct request *r){
+    struct request *cur;
+    struct request *prev;
+    prev = NULL;
+    cur = requestes_list;
+    while(cur){
+        if(cur->timestamp==r->timestamp  && cur->id == r->id){
+            if(prev==NULL){
+                requestes_list = cur->next;
+            }else{      
+                prev->next = cur->next;
+            }
+            free(cur);
+            return 1;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+    return 0;
+}
+
+/**
  * @brief  Restituisce la richiesta  identificandola per id del peer e data
  * @note   
  * @param  t:time_t la data della request
@@ -593,7 +625,7 @@ char* elab_variazione(struct entry *e){
         //printf("Lavoro con %ld prev è %ld\n",e->timestamp.tv_sec,prev->timestamp.tv_sec);
         index = strlen(aux);
         //printf("\tindex è %ld\n",index);
-        //Faccio questa cosa  perché localtime restituisce sempre il puntatore al suo buffer
+        //Utilizzo memcpy perché localtime restituisce sempre il puntatore al suo buffer interno
         //che sovrascrive di volta in volta
         memcpy(end,localtime(&e->timestamp.tv_sec),sizeof(struct tm));
         memcpy(start,localtime(&prev->timestamp.tv_sec),sizeof(struct tm));
@@ -685,6 +717,26 @@ char* get_elab_result_as_string(struct request *r){
 
     return msg;
 }
+/**
+ * @brief  Controlla se i registri presenti che rientrano fra le date di inizio e fine
+ * della request siano completi e chiusi
+ * @note   vedi elab_request
+ * @param  *r:request la richiesta
+ * @retval int 1 : i registri sono tutti completi, 0 almeno un registro aperto o non completo, -1
+ */
+int registers_all_completed_and_closed(struct request *r){
+    struct entries_register *er;
+    //Non c'è nessun registro!
+    if(registers_list == NULL) return 0;
+    er = registers_list;
+    while(er->creation_date<r->date_start) er = er->next;
+    while(er->creation_date<=r->date_end){
+            if(!er->is_completed)return 0;
+            if(er->is_open)return 0;
+            er = er->next;
+    }
+    return 1;
+}
 
 /**
  * @brief  Elabora la richiesta salvando il risultato su file
@@ -702,7 +754,9 @@ char* elab_request(struct request *r){
     //Variazione con un giorno solo?
     if(r->req_type=='v' && r->date_start==r->date_end)return NULL;
     //Controllo che tutti i peer coinvolti abbiano risposto
-    if(!flooding_list_all_checked(r->flooding_list))return NULL;
+    //if(!flooding_list_all_checked(r->flooding_list))return NULL;
+    //Controllo che tutti i registri coinvolti siano chiusi
+    if(!registers_all_completed_and_closed(r)) return NULL;
     //Genero il path per il file
     sprintf(file_name,"/%c%c-%ld_%ld.res",r->req_type,r->entry_type,r->date_start,r->date_end);
     path = malloc(strlen(my_path)+strlen(file_name)+1);
@@ -710,6 +764,7 @@ char* elab_request(struct request *r){
     strcat(path,file_name);
     my_log_print(peer_log,"Path: %s\n",path);
     f = fopen(path,"w");
+    //Elaboro il risutlato
     result = get_elab_result_as_string(r);
     my_log_print(peer_log,"Risultato:\n%s\n",result);
     printf("Risultato:\n%s\n",result);
@@ -752,10 +807,18 @@ struct request* init_request(char type,char req_type,time_t *ds,time_t *de,int *
     req = malloc(sizeof(struct request));
     if(req == NULL) return NULL;
     time(&req->timestamp);
-    if(ds>de){
+    if(ds == NULL)goto fill_request_variables;
+    if(*ds>*de){
         printf("La data di inizio è più grande di quella di fine!\n");
+        printf("s:%s , e:%s\n",ctime(ds),ctime(de));
         return NULL;
     }
+    //Controllo il vincolo del tipo di richiesta 'v' () variazione )
+    if(req_type=='v'&& *ds==*de){
+        printf("Non è possibile calcolare la variazione con una sola data!\n");
+        return NULL;
+    }
+fill_request_variables:
     req->date_start=(ds==NULL)?0:*ds;
     req->date_end=(de==NULL)?0x7fffffffffffffff:*de;
     req->ret_socket = (socket==NULL)?-1:*socket;//Se NULL sono io che faccio la richiesta
@@ -977,16 +1040,29 @@ void registers_list_free(){
  */
 void registers_list_print(){
     struct entries_register *cur;
-    struct entry *e_cur;
+    struct tm *date;
+    
     cur = registers_list;
+    printf("Registers list:\n");
     while(cur){
-        e_cur = cur->entries;
-        printf("register: is_open = %d date: %s",cur->is_open,ctime(&cur->creation_date));
-        while(e_cur){
+        date = malloc(sizeof(struct tm));
+        memcpy(date,localtime(&cur->creation_date),sizeof(struct tm));
+        //e_cur = cur->entries;
+        if(!date)goto prosegui;
+        printf("Registro : %d:%d:%d , ",date->tm_mday,date->tm_mon+1,date->tm_year+1900);
+        printf(" %s, ",(cur->is_open)?"Aperto":"Chiuso");
+        printf(" %s, ",(cur->is_completed)?"Completo":"Incompleto");
+        printf(" Tot entries: %d",cur->count);
+        printf("Cod: %ld\n",cur->creation_date); 
+        /*while(e_cur){
             printf("\tentry: type:%c quantity: %ld date: %s",e_cur->type,e_cur->quantity,ctime(&e_cur->timestamp.tv_sec));  
             e_cur = e_cur->next;
-        }
+        }*/
+        
+prosegui:
+        free(date);
         cur = cur->next;
+        
     }
 }
 
@@ -1607,6 +1683,20 @@ void logs_free(){
     my_log_free(user_log);
 }
 
+int get_loop_flag(){
+    int ret;
+    pthread_mutex_lock(&set_get_mutex);
+    ret = loop_flag;
+    pthread_mutex_unlock(&set_get_mutex);
+    return ret;
+}
+void set_loop_flag(int flag){
+    pthread_mutex_lock(&set_get_mutex);
+    loop_flag = flag;
+    pthread_mutex_unlock(&set_get_mutex);
+    
+}
+
 void ds_option_set(char c);
 /**
  * @brief  Inizializza tutte le variabili globali condivise dai thread
@@ -1631,7 +1721,7 @@ void globals_init(){
     pthread_mutex_init(&neighbors_list_mutex,NULL);
     pthread_mutex_init(&register_mutex,NULL);
     pthread_mutex_init(&fd_mutex,NULL);
-    pthread_mutex_init(&ds_mutex,NULL);
+    pthread_mutex_init(&set_get_mutex,NULL);
 }
 
 /**
@@ -1674,11 +1764,12 @@ int check_date_format(char *dates){
     if(dates==NULL)return -1;
     if(strcmp(dates,"")==0)return -1;
     aux = strtok(dates,"-");
-    my_log_print(user_log,"Stringa trovata %s",aux);
+    my_log_print(user_log,"Stringa trovata %s\n",aux);
     if(strlen(aux)==1) return 2;
     if(strlen(dates+strlen(aux)+1)==1)return 1;
     return 0;
 }
+
 /**
  * @brief  Genera una nuova richiesta e la inserisce nella requestes_list
  * @note   vedi get_last_closed_register, check_date_format, init_request, requestes_list_add
@@ -1714,21 +1805,29 @@ struct request* add_new_request(char rt, char t, char* dates){
     memset(&e,0,sizeof(struct tm));
     switch(check_date_format(dates)){
         case 0://start ed end presenti
+            printf("start e end presenti: %s\n",dates);
             start = malloc(sizeof(time_t));
-            if(sscanf(dates,"%d:%d:%d-%d:%d:%d",
+            if(sscanf(dates,"%d:%d:%d,%d:%d:%d",
             &s.tm_mday,
             &s.tm_mon,
-            &s.tm_yday,
+            &s.tm_year,
             &e.tm_mday,
             &e.tm_mon,
-            &e.tm_yday)<6){
-                printf("Date non valide\nFormato corretto: dd1:mm1:yyyy1-dd2:mm2:yyyy2\n");
+            &e.tm_year)<6){
+                printf("Date non valide\nFormato corretto: dd1:mm1:yyyy1,dd2:mm2:yyyy2\n");
                 return NULL;
             }
             s.tm_mon -=1;
             e.tm_mon -=1;
-            s.tm_yday -=1900;
-            e.tm_yday -=1900;
+            s.tm_year -=1900;
+            e.tm_year -=1900;
+            s.tm_hour = 0;
+            s.tm_min = 0;
+            s.tm_sec = 0;
+            e.tm_hour = 0;
+            e.tm_min = 0;
+            e.tm_sec = 0;
+            printf("%d %d %d \n %d %d %d \n",s.tm_sec,s.tm_min,s.tm_hour,e.tm_sec,e.tm_min,e.tm_hour);
             *start = mktime(&s);
             *end = mktime(&e);
             if(*start>*end){
@@ -1737,42 +1836,55 @@ struct request* add_new_request(char rt, char t, char* dates){
             }
         break;
         case 1://solo start presente
+        printf("start presente: %s\n",dates);
         start = malloc(sizeof(time_t));
         
-        if(sscanf(dates,"%d:%d:%d-*",
+        if(sscanf(dates,"%d:%d:%d,*",
             &s.tm_mday,
             &s.tm_mon,
-            &s.tm_yday)<3){
-                printf("Date non valide\nFormato corretto: dd1:mm1:yyyy1-dd2:mm2:yyyy2\n");
+            &s.tm_year)<3){
+                printf("Date non valide\nFormato corretto: dd1:mm1:yyyy1,dd2:mm2:yyyy2\n");
                 return NULL;
             }
             s.tm_mon -=1;
-            s.tm_yday -=1900;
+            s.tm_year -=1900;
+            s.tm_hour = 0;
+            s.tm_min = 0;
+            s.tm_sec = 0;
             *start = mktime(&s);
             
             
         break;
         case 2://solo end presente
-            if(sscanf(dates,"*-%d:%d:%d",
+            printf("end presente: %s\n",dates);
+            if(sscanf(dates,"*,%d:%d:%d",
                 &e.tm_mday,
                 &e.tm_mon,
-                &e.tm_yday)<3){
-                    printf("Date non valide\nFormato corretto: dd1:mm1:yyyy1-dd2:mm2:yyyy2\n");
+                &e.tm_year)<3){
+                    printf("Date non valide\nFormato corretto: dd1:mm1:yyyy1,dd2:mm2:yyyy2\n");
                     return NULL;
                 }
                 e.tm_mon -=1;
-                e.tm_yday -=1900;
+                e.tm_year -=1900;
+                e.tm_hour = 0;
+                e.tm_min = 0;
+                e.tm_sec = 0;
                 *end = mktime(&e);
         break;
     }
-    
-    if(last_closed_reg->creation_date>*end){
+    if(last_closed_reg->creation_date<*end){
         printf("Data fine troppo grande, aggiornata con l'ultimo registro aperto\n");
         *end = last_closed_reg->creation_date;
     }
-    
+    printf("start: %s, end:%s\n",ctime(start),ctime(end));
+    printf("start: %ld, end:%ld\n",*start,*end);
+    my_log_print(user_log,"start: %s, end:%s\n",ctime(start),ctime(end));
+    //Alloco e inizializzo la request
+    my_log_print(user_log,"Prima di init quest\n");
     r = init_request(t,rt,start,end,NULL,NULL);
-    requestes_list_add(r);
+    if(r)requestes_list_add(r);
+    free(start);
+    free(end);
     return r;
 }
 
@@ -1833,7 +1945,7 @@ void user_loop(){
     long quantity;
     struct request* r;
     printf(PEER_WELCOME_MSG);
-    while(loop_flag){
+    while(get_loop_flag()){
         //printf(">> ");
         fgets(msg, 40, stdin);
         my_log_print(user_log,"User ha scritto: %s",msg);
@@ -1925,6 +2037,11 @@ void user_loop(){
                     strcpy(args[3],"");
                 }
                 r = add_new_request(args[1][0],args[2][0],args[3]);
+                if(!r){
+                    printf("Richiesta scartata\n");
+                    my_log_print(user_log,"Tipo di richiesta errata\n");
+                    break;
+                }
                 my_log_print(user_log,"Nuova Request inserita con successo: %ld \n",r->timestamp);
                 result = get_result_if_exist(r);
                 if(result!=NULL){
@@ -1937,8 +2054,8 @@ void user_loop(){
                 my_log_print(user_log,"File non esistente, avvio controllo dei registri per calcolo\n");
                 result = elab_request(r);
                 if(result!=NULL){
-                    printf("Calcolo effettuato localmente:\n%s\n",result);
-                    my_log_print(user_log,"Calcolo effettuato localmente:\n%s\n",result);
+                    printf("Calcolo effettuato localmente.\nRisultato salvato in:\n%s\n",result);
+                    my_log_print(user_log,"Elaborato salvato in: %s\n",result);
                     free(result);
                     break;
                 }
@@ -1962,7 +2079,7 @@ void user_loop(){
                 send_backups_to_all();
                 printf("Invio byebye a tutti...\n");
                 send_byebye_to_all();
-                loop_flag = 0;
+                set_loop_flag(0);
                 printf("Attendo il thread UDP\n");
                 pthread_join(ds_comunication_thread,&ret);
                 printf("Attendo il thread TCP\n");
@@ -1973,6 +2090,8 @@ void user_loop(){
             case 5://showpeers
                 my_log_print(user_log,"Riconosciuto comando Showpeers\n");
                 neighbors_list_print();
+                registers_list_print();
+
             break;
             //__comando non riconosciuto__
             default:
@@ -2183,6 +2302,7 @@ char* generate_backup_message(time_t *s,time_t *e){
     while(er){
         //printf("er = %ld\n",er->creation_date);
         if(er->creation_date<start){//Data non compresa
+            my_log_print(peer_log,"creation_date: %ld , start=%ld\n",er->creation_date,start);
             er = er->next;
             continue;
         }
@@ -2790,9 +2910,9 @@ char ds_option;
  */
 char ds_option_get(){
     char c;
-    pthread_mutex_lock(&ds_mutex);
+    pthread_mutex_lock(&set_get_mutex);
     c = ds_option;
-    pthread_mutex_unlock(&ds_mutex);
+    pthread_mutex_unlock(&set_get_mutex);
     return c;
 }
 /**
@@ -2802,9 +2922,9 @@ char ds_option_get(){
  * @retval None
  */
 void ds_option_set(char c){
-    pthread_mutex_lock(&ds_mutex);
+    pthread_mutex_lock(&set_get_mutex);
     ds_option = c;
-    pthread_mutex_unlock(&ds_mutex);
+    pthread_mutex_unlock(&set_get_mutex);
 }
 /**
  * @brief  Gestisce la comunicazione con il DS ottentendo i vicini
@@ -2862,7 +2982,7 @@ void* ds_comunication_loop(void *arg){
     inet_pton(AF_INET,LOCAL_HOST,&ds_addr.sin_addr);
     ds_addrlen = sizeof(ds_addr);
     
-    while(loop_flag){
+    while(get_loop_flag()){
         option = ds_option_get();
         //Richiesta vicini
         sprintf(buffer,"%u,%d,%ld,%c",my_addr.s_addr,my_port,current_open_date,option);
@@ -2998,7 +3118,7 @@ void serve_peer(int socket_served){
         case 'B'://bye bye
             my_log_print(peer_log,"Ricevuto un messaggio di addio da %d\n",socket_served);
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
-            my_log_print(peer_log,"Sengalo al DS_thread di richiedere la lista dei peer\n");
+            my_log_print(peer_log,"Richiedo al DS_thread la lista dei peer\n");
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
             //neighbors_list_print();
             break;
@@ -3006,8 +3126,9 @@ void serve_peer(int socket_served){
             //Il messaggio non rispetta i protocolli di comunicazione, rimuovo il peer
             my_log_print(peer_log,"Il peer non rispetta i protocolli di comunicazione, lo elimino dalla lista dei peer\n");
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
-            my_log_print(peer_log,"Sengalo al DS_thread di richiedere la lista dei peer\n");
+            my_log_print(peer_log,"Richiedo al DS_thread la lista dei peer\n");
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
+            sleep(2);
             //neighbors_list_print();
             break;
     }
@@ -3051,7 +3172,7 @@ void * tcp_comunication_loop(void *arg){
     max_socket = s_socket;
     pthread_mutex_unlock(&fd_mutex);
     my_log_print(peer_log,"Tutto pronto, inizio loop\n");
-    while(loop_flag){
+    while(get_loop_flag()){
         pthread_mutex_lock(&fd_mutex);
         to_read = master;
         pthread_mutex_unlock(&fd_mutex);

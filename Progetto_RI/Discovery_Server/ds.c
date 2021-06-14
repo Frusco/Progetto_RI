@@ -20,6 +20,7 @@ struct my_log *ds_log;
 struct my_log *user_log;
 struct my_log *timer_log;
 
+
 pthread_mutex_t timer_mutex;
 
 struct timer_elem{
@@ -449,6 +450,22 @@ void logs_free(){
 
 //Gestisce il loop dei thread
 int loop_flag;
+pthread_mutex_t loop_mutex;
+
+int get_loop_flag(){
+    int ret;
+    pthread_mutex_lock(&loop_mutex);
+    ret = loop_flag;
+    pthread_mutex_unlock(&loop_mutex);
+    return ret;
+}
+void set_loop_flag(int flag){
+    pthread_mutex_lock(&loop_mutex);
+    loop_flag = flag;
+    pthread_mutex_unlock(&loop_mutex);
+    
+}
+
 /**
  * @brief  Inizializza tutte le variabili globali
  * @note   
@@ -470,6 +487,7 @@ void globals_init(){
     pthread_mutex_init(&list_mutex,NULL);
     pthread_mutex_init(&table_mutex,NULL);
     pthread_mutex_init(&timer_mutex,NULL);
+    pthread_mutex_init(&loop_mutex,NULL);
     logs_init();
 }
 
@@ -1090,14 +1108,14 @@ void* thread_ds_loop(void* arg){
     if(open_udp_socket(&ds_socket,&ds_addr,port)){
         perror("[DS_Thread]: Impossibile aprire socket");
         my_log_print(ds_log,"Impossibile aprire la socket alla porta: %d, chiusura in corso...\n",port);
-        loop_flag = 0;
+        set_loop_flag(0);
         pthread_exit(NULL);
     }
     my_log_print(ds_log,"Socket aperta!\n");
     printf("[DS_Thread]: Socket UDP aperta alla porta: %d\n",port);
     peer_addrlen = sizeof(peer_addr);
     //thread_test();
-    while(loop_flag){
+    while(get_loop_flag()){
         
         if(recvfrom(ds_socket,buffer,DS_BUFFER,0,(struct sockaddr*)&peer_addr,&peer_addrlen)<0){
             perror("[DS_Thread]: Errore nella ricezione");
@@ -1194,7 +1212,7 @@ void check_closing_hour(){
 void * thread_timer_loop(void* arg){
     printf("[Timer_Thread]: ready.\n");
     my_log_print(timer_log,"Pronto\n");
-    while(loop_flag){
+    while(get_loop_flag()){
         sleep(1);
         timer_list_update();
         check_closing_hour();
@@ -1238,7 +1256,7 @@ void send_exit_packet(int ds_port){
     struct sockaddr_in ds_addr,socket_addr;
     if(open_udp_socket(&socket,&socket_addr,ds_port+1)){
         perror("Impossibile aprire socket");
-        loop_flag = 0;
+        set_loop_flag(0);
         exit(EXIT_FAILURE);
     }
     ds_addr.sin_family = AF_INET; //Tipo di socket
@@ -1266,7 +1284,7 @@ void user_loop(int port){
     char args[2][SERVER_MAX_COMMAND_SIZE];
     my_log_print(user_log,"Stampo messaggio di benvenuto...\n");
     printf(SERVER_WELCOME_MSG);
-    while(loop_flag){
+    while(get_loop_flag()){
         printf(">> ");
         fgets(msg, 40, stdin);
         args_number = sscanf(msg,"%s %s",args[0],args[1]);
@@ -1306,7 +1324,7 @@ void user_loop(int port){
             case 3:
                 my_log_print(user_log,"Riconosciuto comando Esc\n");
                 my_log_print(user_log,"Setto loop_flag a 0\n");
-                loop_flag = 0;
+                set_loop_flag(0);
                 printf("Chiusura in corso...\n");
                 my_log_print(user_log,"Invio il pacchetto di uscita alla socket udp\n");
                 send_exit_packet(port);
@@ -1364,7 +1382,7 @@ int main(int argc, char* argv[]){
     }
     sleep(1);
     //Salto alla gestione dell'interfaccia utente
-    if(loop_flag) user_loop(port);
+    if(get_loop_flag()) user_loop(port);
     my_log_print(user_log,"In attesa del Service Thread\n");
     pthread_join(service_thread,&thread_ret);
     my_log_print(user_log,"In attesa del Timer Thread\n");
