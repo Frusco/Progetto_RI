@@ -225,6 +225,7 @@ void sync_time_add_day(){
     pthread_mutex_lock(&sync_time_mutex);
     //Aggiungo un giorno
     sync_time+= 86400;
+    printf("Nuovo giorno:\n%s",ctime(&sync_time));
     pthread_mutex_unlock(&sync_time_mutex);
 }
 /**

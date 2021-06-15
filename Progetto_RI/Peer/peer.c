@@ -1053,7 +1053,7 @@ void registers_list_print(){
         printf(" %s, ",(cur->is_open)?"Aperto":"Chiuso");
         printf(" %s, ",(cur->is_completed)?"Completo":"Incompleto");
         printf(" Tot entries: %d",cur->count);
-        printf("Cod: %ld\n",cur->creation_date); 
+        printf(" Cod: %ld\n",cur->creation_date);
         /*while(e_cur){
             printf("\tentry: type:%c quantity: %ld date: %s",e_cur->type,e_cur->quantity,ctime(&e_cur->timestamp.tv_sec));  
             e_cur = e_cur->next;
@@ -1761,13 +1761,23 @@ int find_command(char* command){
  */
 int check_date_format(char *dates){
     char *aux;
-    if(dates==NULL)return -1;
-    if(strcmp(dates,"")==0)return -1;
-    aux = strtok(dates,"-");
-    my_log_print(user_log,"Stringa trovata %s\n",aux);
-    if(strlen(aux)==1) return 2;
-    if(strlen(dates+strlen(aux)+1)==1)return 1;
-    return 0;
+    char* cpy;
+    int ret = 0; //Sia start che end
+    if(dates==NULL)return -1;//nessuna data
+    cpy = malloc(strlen(dates)+1);
+    strcpy(cpy,dates);
+    if(strcmp(cpy,"")==0)return -1;
+    aux = strtok(cpy,",");
+    //my_log_print(user_log,"Controllo prima data: %s\n",aux);
+    printf("aux = %s\n",aux);
+    if(strlen(aux)==1) ret=2;//Solo end
+    else {
+        aux = strtok(NULL,",");
+        printf("aux2=%s\n",aux);
+        if(strlen(aux)==1) ret=1;//Solo start ( dates+strlen(aux)+1 punto alla parte di stringa che mi interessa )
+    }
+    free(cpy);
+    return ret;
 }
 
 /**
@@ -1795,6 +1805,7 @@ struct request* add_new_request(char rt, char t, char* dates){
         return NULL;
     }
     last_closed_reg = get_last_closed_register();
+    my_log_print(user_log,"Prima dello switch\n");
     if(last_closed_reg==NULL){
         printf("Non esiste ancora un registro chiuso!\n");
         return NULL;
@@ -1821,10 +1832,10 @@ struct request* add_new_request(char rt, char t, char* dates){
             e.tm_mon -=1;
             s.tm_year -=1900;
             e.tm_year -=1900;
-            s.tm_hour = 0;
+            s.tm_hour -= 1;
             s.tm_min = 0;
             s.tm_sec = 0;
-            e.tm_hour = 0;
+            e.tm_hour -= 1;
             e.tm_min = 0;
             e.tm_sec = 0;
             printf("%d %d %d \n %d %d %d \n",s.tm_sec,s.tm_min,s.tm_hour,e.tm_sec,e.tm_min,e.tm_hour);
@@ -1848,7 +1859,7 @@ struct request* add_new_request(char rt, char t, char* dates){
             }
             s.tm_mon -=1;
             s.tm_year -=1900;
-            s.tm_hour = 0;
+            s.tm_hour -= 1;
             s.tm_min = 0;
             s.tm_sec = 0;
             *start = mktime(&s);
@@ -1866,19 +1877,20 @@ struct request* add_new_request(char rt, char t, char* dates){
                 }
                 e.tm_mon -=1;
                 e.tm_year -=1900;
-                e.tm_hour = 0;
+                e.tm_hour -= 1;
                 e.tm_min = 0;
                 e.tm_sec = 0;
                 *end = mktime(&e);
         break;
     }
+    my_log_print(user_log,"Dopo lo switch\n");
     if(last_closed_reg->creation_date<*end){
         printf("Data fine troppo grande, aggiornata con l'ultimo registro aperto\n");
         *end = last_closed_reg->creation_date;
     }
-    printf("start: %s, end:%s\n",ctime(start),ctime(end));
-    printf("start: %ld, end:%ld\n",*start,*end);
-    my_log_print(user_log,"start: %s, end:%s\n",ctime(start),ctime(end));
+    //printf("start: %s, end:%s\n",ctime(start),ctime(end));
+    //printf("start: %ld, end:%ld\n",*start,*end);
+    my_log_print(user_log,"start: %s, end:%s\n",(start!=NULL)?ctime(start):"Nessuna",ctime(end));
     //Alloco e inizializzo la request
     my_log_print(user_log,"Prima di init quest\n");
     r = init_request(t,rt,start,end,NULL,NULL);
@@ -3065,7 +3077,7 @@ void serve_peer(int socket_served){
         my_log_print(peer_log,"In attesa del messaggio...\n",len);
         if(recv(socket_served,(void*)buffer,len,0)<0){
             my_log_print(peer_log,"Errore nella ricezione, gestisco...\n",len);
-            perror("Errore in fase di ricezione\n");
+            //perror("Errore in fase di ricezione\n");
             return;
         }
         my_log_print(peer_log,"Messaggio letto correttamente\n");
@@ -3128,7 +3140,12 @@ void serve_peer(int socket_served){
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
             my_log_print(peer_log,"Richiedo al DS_thread la lista dei peer\n");
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
+            printf("Un vicino ha inviato un messaggio anomalo,\nlo rimuovo dalla lista dei vicini\n");
+            sleep(1);
+            printf("Richiedo nuovamente la lista dei vicini al DS, attendere\n");
             sleep(2);
+            printf("Risolto.\n");
+            neighbors_list_print();
             //neighbors_list_print();
             break;
     }
