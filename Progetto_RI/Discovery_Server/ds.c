@@ -135,7 +135,7 @@ void timer_list_update(){
     my_log_print(timer_log,"Controllo i TTL scaduti\n");
     while(timer_list_head_time_experide()){
         //sleep(1);
-        my_log_print(timer_log,"ID:%d ha TTL 0, rimuvo il peer\n",timer_list->id);
+        my_log_print(timer_log,"ID:%d ha TTL 0, rimuovo il peer\n",timer_list->id);
         remove_peer(timer_list->id); 
     }
 }
@@ -631,6 +631,7 @@ Raddoppiamo la sua grandezza moltiplicando per due peers_table_size e usando rea
  */
 void peers_table_remove_peer(int i){
     struct peer_des *pd;
+    pthread_mutex_lock(&table_mutex);
     if(i>=peers_table_size){pthread_mutex_unlock(&table_mutex); return;}
     pd = &peers_table[i];
     if(pd->port == -1){pthread_mutex_unlock(&table_mutex);return;}

@@ -938,6 +938,14 @@ struct entries_register* get_last_closed_register(){
     // Nessun registro aperto!
     return prev;
 }
+/**
+ * @brief  Restituisce il registro chiuso più vecchio
+ * @note   
+ * @retval entries_register* puntatore all'elemento in testa alla registers_list se chiuso, NULL altrimenti
+ */
+struct entries_register* get_first_closed_register(){
+    return (registers_list->is_open)?NULL:registers_list;
+}
 
 /**
  * @brief  Cerca la prima lista aperta della registers_list e 
@@ -1805,19 +1813,21 @@ struct request* add_new_request(char rt, char t, char* dates){
         return NULL;
     }
     last_closed_reg = get_last_closed_register();
-    my_log_print(user_log,"Prima dello switch\n");
+    my_log_print(user_log,"lcr = %s\n",ctime(&last_closed_reg->creation_date));
     if(last_closed_reg==NULL){
         printf("Non esiste ancora un registro chiuso!\n");
         return NULL;
     }
     end = malloc(sizeof(time_t));
-    *end = last_closed_reg->creation_date;
+    start = malloc(sizeof(time_t));
+    *end = -1;
+    *start =-1;
     memset(&s,0,sizeof(struct tm));
     memset(&e,0,sizeof(struct tm));
     switch(check_date_format(dates)){
         case 0://start ed end presenti
             printf("start e end presenti: %s\n",dates);
-            start = malloc(sizeof(time_t));
+            
             if(sscanf(dates,"%d:%d:%d,%d:%d:%d",
             &s.tm_mday,
             &s.tm_mon,
@@ -1848,7 +1858,6 @@ struct request* add_new_request(char rt, char t, char* dates){
         break;
         case 1://solo start presente
         printf("start presente: %s\n",dates);
-        start = malloc(sizeof(time_t));
         
         if(sscanf(dates,"%d:%d:%d,*",
             &s.tm_mday,
@@ -1883,12 +1892,15 @@ struct request* add_new_request(char rt, char t, char* dates){
                 *end = mktime(&e);
         break;
     }
+    if(*end==-1)*end = last_closed_reg->creation_date;
+    if(*start==-1)*start = get_first_closed_register()->creation_date;
     my_log_print(user_log,"Dopo lo switch\n");
     if(last_closed_reg->creation_date<*end){
         printf("Data fine troppo grande, aggiornata con l'ultimo registro aperto\n");
         *end = last_closed_reg->creation_date;
     }
     //printf("start: %s, end:%s\n",ctime(start),ctime(end));
+    my_log_print(user_log,"fcr: %s, lcr:%s\n",(start!=NULL)?ctime(&get_first_closed_register()->creation_date):"Nessuna",ctime(&last_closed_reg->creation_date));
     //printf("start: %ld, end:%ld\n",*start,*end);
     my_log_print(user_log,"start: %s, end:%s\n",(start!=NULL)?ctime(start):"Nessuna",ctime(end));
     //Alloco e inizializzo la request
@@ -2309,26 +2321,29 @@ char* generate_backup_message(time_t *s,time_t *e){
     time_t start,end;
     er = registers_list;
     if(er == NULL) return NULL;
-    end = (e==NULL)?0x7fffffffffffffff:*e;
-    start = (s==NULL)?0:*s;
+//    end = (e==NULL)?0x7fffffffffffffff:*e;
+//    start = (s==NULL)?0:*s;
+      //La data passata ( e ) altrimenti vogliamo spedire tutto e consideriamo anche il registro aperto ( caso esc )  
+      end = (e==NULL)?get_open_register()->creation_date:*e;
+      //La data passata ( s ) altrimenti il primo registro chiuso se esiste, altrimenti l'unico registro aperto.
+      start = (s==NULL)?er->creation_date:*s;
+    //Per ogni registro nel range leggo le entry in un msg e via via concateno tutto in tot_msg
+    //Generando un unico messaggio con i registri e le relative entry interessate
     while(er){
         //printf("er = %ld\n",er->creation_date);
         if(er->creation_date<start){//Data non compresa
-            my_log_print(peer_log,"creation_date: %ld , start=%ld\n",er->creation_date,start);
+            my_log_print(peer_log,"creation_date: %ld <  start=%ld  ignoro per backup\n",er->creation_date,start);
             er = er->next;
             continue;
         }
         if(er->creation_date>end)break;//Abbiamo superato la data di fine
-       // printf("Prima di stampare il nome\n");
-       // printf("%ld,%u\npath:%s\n",er->creation_date,er->count,er->path);
         sprintf(name,"%ld,%u\n",er->creation_date,er->count);
-       // printf("Prima di aprire il file\n");
         er->f=fopen(er->path,"r");
         if(er->f==NULL){
-            //printf("file non presente, continuo\n");
             er = er->next;
             continue;
         }
+        //Controllo la dimensione del file
         fseek(er->f, 0L, SEEK_SET);
         fseek(er->f, 0L, SEEK_END);
         size = ftell(er->f);
@@ -2343,22 +2358,14 @@ char* generate_backup_message(time_t *s,time_t *e){
         }
         fread((void*)(msg+strlen(name)),sizeof(char),size,er->f);
         msg[size+strlen(name)]='\0';
-        if(tot_msg == NULL){
-            //printf("Faccio la malloc\n");
+        if(tot_msg == NULL){//Prima volta che alloco tot_msg
             tot_msg = malloc(strlen(msg)+1);
-            //printf("Faccio la strcpy\n");
-            strcpy(tot_msg,msg);
-            
-        }else{
-            //printf("Faccio realloc\n");
+            strcpy(tot_msg,msg);      
+        }else{//Realloco tot_msg aggiungendoci le nuove entry del registro letto
             tot_msg = realloc(tot_msg,(strlen(tot_msg)+strlen(msg)+1));
-            //tot_msg[strlen(tot_msg)] = '\n';
-            //printf("Faccio la cat\n");
             strncat(tot_msg,msg,strlen(msg));
         }
-        //printf("Prima di chiudere il file\n");
         fclose(er->f);
-        //printf("Messaggio parziale %s",tot_msg);
         er = er->next;
         
     }
