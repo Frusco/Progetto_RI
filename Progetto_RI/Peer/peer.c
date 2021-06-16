@@ -2114,6 +2114,10 @@ void user_loop(){
             case 5://showpeers
                 my_log_print(user_log,"Riconosciuto comando Showpeers\n");
                 neighbors_list_print();
+
+            break;
+            case 6://showregs
+                my_log_print(user_log,"Riconosciuto comando Showregs\n");
                 registers_list_print();
 
             break;
@@ -2369,6 +2373,7 @@ char* generate_backup_message(time_t *s,time_t *e){
         er = er->next;
         
     }
+    tot_msg[strlen(tot_msg)]= '\0';
     return tot_msg;
 }
 /**

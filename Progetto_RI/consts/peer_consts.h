@@ -2,13 +2,13 @@
 #define DEFAULT_DS_PORT 4242
 #define DEFAULT_PEER_PORT 25566
 //Numero di comandi e lunghezza del comando più grande
-#define PEER_COMMANDS_NUMBER 6
+#define PEER_COMMANDS_NUMBER 7
 #define PEER_MAX_COMMAND_SIZE 10
 //Buffer per la comunicazione con il DS tramite UDP
 #define DS_BUFFER 255
 #define PEER_WELCOME_MSG "Peer pronto, benvenuto!\nScrivi comando, ( help per mostrare lista comandi )\n"
 #define PEER_HELP_MSG "start porta : \nadd : \nget :\nesc: chiudi il peer\n"
-#define PEER_COMMAND_LIST {"help","start","add","get","esc","showpeers"}
+#define PEER_COMMAND_LIST {"help","start","add","get","esc","showpeers","showregs"}
 //Maschera del primo pacchetto da 8 byte fissi
 // < 3 byte liberi> < 1 byte tipo operazione > < 4 byte lunghezza prossimo pacchetto >
 #define PACKET_MASK 0x00000000FFFFFFFF 

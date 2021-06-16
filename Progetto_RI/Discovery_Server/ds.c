@@ -634,6 +634,7 @@ void peers_table_remove_peer(int i){
     pthread_mutex_lock(&table_mutex);
     if(i>=peers_table_size){pthread_mutex_unlock(&table_mutex); return;}
     pd = &peers_table[i];
+    if(pd==NULL) return;
     if(pd->port == -1){pthread_mutex_unlock(&table_mutex);return;}
     pd->port = -1;
     free(pd->neighbors_vector);
