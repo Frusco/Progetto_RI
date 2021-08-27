@@ -1813,7 +1813,7 @@ struct request* add_new_request(char rt, char t, char* dates){
         return NULL;
     }
     last_closed_reg = get_last_closed_register();
-    my_log_print(user_log,"lcr = %s\n",ctime(&last_closed_reg->creation_date));
+    my_log_print(user_log,"last_closed_reg = %s\n",ctime(&last_closed_reg->creation_date));
     if(last_closed_reg==NULL){
         printf("Non esiste ancora un registro chiuso!\n");
         return NULL;
@@ -1821,7 +1821,7 @@ struct request* add_new_request(char rt, char t, char* dates){
     end = malloc(sizeof(time_t));
     start = malloc(sizeof(time_t));
     *end = -1;
-    *start =-1;
+    *start = -1;
     memset(&s,0,sizeof(struct tm));
     memset(&e,0,sizeof(struct tm));
     switch(check_date_format(dates)){
@@ -1836,6 +1836,14 @@ struct request* add_new_request(char rt, char t, char* dates){
             &e.tm_mon,
             &e.tm_year)<6){
                 printf("Date non valide\nFormato corretto: dd1:mm1:yyyy1,dd2:mm2:yyyy2\n");
+                return NULL;
+            }
+            if(s.tm_mday<1 || s.tm_mday>31 || s.tm_mon<1 || s.tm_mon>12 || s.tm_year<1900){
+                printf("Data Inizio non valida\nFormato corretto: dd1:mm1:yyyy1,dd2:mm2:yyyy2\n");
+                return NULL;
+            }
+            if(e.tm_mday<1 || e.tm_mday>31 || e.tm_mon<1 || e.tm_mon>12 || e.tm_year<1900){
+                printf("Data Fine non valida\nFormato corretto: dd1:mm1:yyyy1,dd2:mm2:yyyy2\n");
                 return NULL;
             }
             s.tm_mon -=1;
