@@ -46,11 +46,15 @@ time_t current_open_date;
 fd_set master;
 //FD set contenente le socket da leggere
 fd_set to_read;
-//Mutex per garantire mutualità esclusiva a agli fd_set
+//Mutex per garantire mutualità esclusiva agli fd_set (durante l'inserimento o la rimozione di un nuovo peer)
 pthread_mutex_t fd_mutex;
-////Mutex per garantire mutualità esclusiva al char contentente l'opzione da richiede al DS
+//Mutex per garantire mutualità esclusiva al char contentente l'opzione da richiede al DS (r: refresh TTL x: get Neighbors)
+//E per il loop_flag
 pthread_mutex_t set_get_mutex;
 pthread_mutex_t register_mutex;
+pthread_mutex_t request_mutex;
+pthread_cond_t request_busy;
+int req_busy_flag;
 pthread_t ds_comunication_thread;
 pthread_t tcp_comunication_thread;
 struct neighbour{
@@ -134,6 +138,39 @@ struct FILE_request{
 //Puntatore alla richiesta FILE corrente
 struct FILE_request *cur_FILE_request;
 struct flooding_mate* init_flooding_list(int avoid_socket);
+
+/**
+ * @brief  Blocca il thread utente in attesa di una risposta della Richiesta effettuata
+ * @note   Vedi user_loop()
+ * @retval None
+ */
+void wait_request_elaboration(){
+    pthread_mutex_lock(&request_mutex);
+    while(req_busy_flag) pthread_cond_wait(&request_busy,&request_mutex);
+    pthread_mutex_unlock(&request_mutex);
+}
+/**
+ * @brief  Blocca l'input utente per la durata dell'elaborazione della richiesta
+ * @note   Vedi
+ * @retval None
+ */
+void lock_user_input(){
+    pthread_mutex_lock(&request_mutex);
+    req_busy_flag=1;
+    pthread_mutex_unlock(&request_mutex);
+}
+/**
+ * @brief  Sblocca l'input utente a Richiesta elaborata
+ * @note   Vedi 
+ * @retval None
+ */
+void unlock_user_input(){
+    pthread_mutex_lock(&request_mutex);
+    req_busy_flag=0;
+    pthread_cond_broadcast(&request_busy);
+    pthread_mutex_unlock(&request_mutex);
+}
+
 /**
  * @brief  Setta il file richiesto, può esserci solo una richiesta di file alla volta
  * @note   
@@ -345,6 +382,7 @@ void manage_FILE_found(char* buffer,int socket_served){
     f = fopen(path,"wb");
     if(f==NULL){
         printf("Errore nella fopen con path= %s",path);
+        unlock_user_input();
         return;
     }
     
@@ -355,6 +393,7 @@ void manage_FILE_found(char* buffer,int socket_served){
     printf("\nRisultato:\n%s\n",buffer);
     fclose(f);
     free(path);
+    unlock_user_input();
     cur_FILE_request_free();
 }
 
@@ -466,6 +505,7 @@ void flooding_list_print(struct flooding_mate* fm){
     }
     printf("\n");
 }
+
 
 /**
  * @brief  Aggiunge la request alla requestes_list
@@ -771,6 +811,7 @@ char* elab_request(struct request *r){
     fprintf(f,"%s",result);
     fclose(f);
     free(result);
+    unlock_user_input();
     return path;
 }
 
@@ -1111,10 +1152,10 @@ struct neighbour* neighbour_init_and_connect(int id,struct in_addr addr,int port
     n->addr.sin_addr = addr;
     if(connect(n->socket,(struct sockaddr*)&n->addr,sizeof(n->addr))==0){
         if(send_greeting_message(n)) return n;
-        perror("Errore nell'invio del messaggio di saluto!\n");
+        my_log(peer_log,"Errore nell'invio del messaggio di saluto! Ignoro socket\n");
         return NULL;
     }else{
-        perror("Errore nell'apertura della neighbour socket");
+        my_log(peer_log,"Errore nell'apertura della neighbour socket, DS non ancora aggiornato? Ignoro socket\n");
         return NULL;
     }
 }
@@ -1543,7 +1584,7 @@ int remove_neighbour(int id){
     pthread_mutex_unlock(&fd_mutex);
     free(n);
     pthread_mutex_unlock(&neighbors_list_mutex);
-    neighbors_list_print();
+    //neighbors_list_print();
     return 1;
 }
 
@@ -1562,28 +1603,7 @@ void neighbors_list_free(){
     }
 }
 
-
-
-
-/*
-### DS REQUESTER THREAD ########################
-*/
 struct sockaddr ds_addr;
-
-
-
-/*
-### NEIGHBORS MANAGER THREAD ##################
-*/
-
-/*void* neighbors_loop(int s_port){
-    int ret,newfd,listener,addrlen,i,len,fdmax;
-
-}*/
-
-
-
-
 /*
 ### GLOBALS INIT E FREE #####################
 */
@@ -1718,6 +1738,8 @@ void globals_init(){
     max_socket = 0;
     neighbors_number = 0;
     loop_flag = 1;
+    //Flag per indicare se è in corso una operazione Request ( Blocca l'input utente )
+    req_busy_flag = 0;
     ds_comunication_thread = 0;
     tcp_comunication_thread = 0;
     FD_ZERO(&master);
@@ -1726,6 +1748,8 @@ void globals_init(){
     generate_work_folders();
     registers_list_init();
     logs_init();
+    pthread_cond_init(&request_busy,NULL);
+    pthread_mutex_init(&request_mutex,NULL);
     pthread_mutex_init(&neighbors_list_mutex,NULL);
     pthread_mutex_init(&register_mutex,NULL);
     pthread_mutex_init(&fd_mutex,NULL);
@@ -1777,11 +1801,9 @@ int check_date_format(char *dates){
     if(strcmp(cpy,"")==0)return -1;
     aux = strtok(cpy,",");
     //my_log_print(user_log,"Controllo prima data: %s\n",aux);
-    printf("aux = %s\n",aux);
     if(strlen(aux)==1) ret=2;//Solo end
     else {
         aux = strtok(NULL,",");
-        printf("aux2=%s\n",aux);
         if(strlen(aux)==1) ret=1;//Solo start ( dates+strlen(aux)+1 punto alla parte di stringa che mi interessa )
     }
     free(cpy);
@@ -1856,7 +1878,6 @@ struct request* add_new_request(char rt, char t, char* dates){
             e.tm_hour -= 1;
             e.tm_min = 0;
             e.tm_sec = 0;
-            printf("%d %d %d \n %d %d %d \n",s.tm_sec,s.tm_min,s.tm_hour,e.tm_sec,e.tm_min,e.tm_hour);
             *start = mktime(&s);
             *end = mktime(&e);
             if(*start>*end){
@@ -1934,26 +1955,6 @@ void test_add_entry(){
     }
 }
 
-/*
-//Sveglio il thread in ascolto per farlo uscire dal loop
-void send_exit_packet(int ds_port){
-    char msg[5] = "exit";
-    int socket;
-    socklen_t ds_addrlen;
-    struct sockaddr_in ds_addr,socket_addr;
-    if(open_udp_socket(&socket,&socket_addr,ds_port+1)){
-        perror("Impossibile aprire socket");
-        loop_flag = 0;
-        exit(EXIT_FAILURE);
-    }
-    ds_addr.sin_family = AF_INET; //Tipo di socket
-    ds_addr.sin_s_port = htons(ds_port);//Porta
-    inet_pton(AF_INET,LOCAL_HOST,&ds_addr.sin_addr);
-    ds_addrlen = sizeof(ds_addr);
-    sendto(socket,msg,5,0,(struct sockaddr*)&ds_addr,ds_addrlen);
-    close(socket);
-}
-*/
 void send_backups_to_all();
 void send_request_to_all(struct request *r,int *avoid_socket);
 void* ds_comunication_loop(void*arg);
@@ -1978,7 +1979,8 @@ void user_loop(){
     struct request* r;
     printf(PEER_WELCOME_MSG);
     while(get_loop_flag()){
-        //printf(">> ");
+        wait_request_elaboration();
+        printf(">> ");
         fgets(msg, 40, stdin);
         my_log_print(user_log,"User ha scritto: %s",msg);
         args_number = sscanf(msg,"%s %s %s %s",args[0],args[1],args[2],args[3]);
@@ -2059,6 +2061,11 @@ void user_loop(){
             //__get__
             case 3:
                 my_log_print(user_log,"Riconosciuto comando Get\n");
+                if(my_id==-1){
+                    printf("Non sei connesso alla rete!\n");
+                    my_log_print(user_log,"Utente non connesso alla rete, operazione ignorata\n");
+                    break;
+                }
                 if(args_number<3){
                     printf("Inserire aggr type period\n");
                     my_log_print(user_log,"Args passati < 3 , 'get' annulato\n");
@@ -2084,6 +2091,7 @@ void user_loop(){
                 }
                 printf("File non esistente, controllo i registri per poterlo calcolare\n");
                 my_log_print(user_log,"File non esistente, avvio controllo dei registri per calcolo\n");
+                lock_user_input();
                 result = elab_request(r);
                 if(result!=NULL){
                     printf("Calcolo effettuato localmente.\nRisultato salvato in:\n%s\n",result);
@@ -2142,41 +2150,7 @@ void user_loop(){
 }
 
 
-/*void send_exit_packet(int ds_port){
-    char msg[5] = "exit";
-    int socket;
-    socklen_t ds_addrlen;
-    struct sockaddr_in ds_addr,socket_addr;
-    if(open_udp_socket(&socket,&socket_addr,ds_port+1)){
-        perror("Impossibile aprire socket");
-        loop_flag = 0;
-        exit(EXIT_FAILURE);
-    }
-    ds_addr.sin_family = AF_INET; //Tipo di socket
-    ds_addr.sin_port = htons(ds_port);//Porta
-    inet_pton(AF_INET,LOCAL_HOST,&ds_addr.sin_addr);
-    ds_addrlen = sizeof(ds_addr);
-    sendto(socket,msg,5,0,(struct sockaddr*)&ds_addr,ds_addrlen);
-    close(socket);
-}*/
 
-/*
-    uint64_t prova=0;
-    uint64_t mask = 0x00000000FFFFFFFF;
-    uint32_t len = 598764;
-    uint32_t option = 'n'; //4 byte option;
-    option = htonl(option);
-    len = htonl(len);
-    prova = option;
-    prova = prova<<32 | len;
-    printf("%u,%u\n",prova>>32,prova & mask);
-    option = prova>>32;
-    len = prova & mask;
-    option = htonl(option);
-    len = htonl(len);
-    printf("%u,%u\n",option,len);
-    return 1;
-*/
 /**
  * @brief  Genera il messaggio di saluto;
  * @note   
@@ -2973,6 +2947,9 @@ void ds_option_set(char c){
  * @retval None
  */
 void* ds_comunication_loop(void *arg){
+    int cur_bytes;
+    unsigned int total_bytes=0;
+    unsigned int packets_recived=0;
     fd_set ds_master;
     fd_set ds_to_read;
     int ret;
@@ -3025,10 +3002,13 @@ void* ds_comunication_loop(void *arg){
         ret = select(socket+1,&ds_to_read,NULL,NULL,&timeout); //Abbiamo solo una socket nella lista
         //perror("Select:");
         if(ret==1){
-            if(recvfrom(socket,buffer,DS_BUFFER,0,(struct sockaddr*)&ds_addr,&ds_addrlen)<0){
+            cur_bytes = recvfrom(socket,buffer,DS_BUFFER,0,(struct sockaddr*)&ds_addr,&ds_addrlen);
+            if(cur_bytes<0){
                 printf("DS_Thread: Errore nella ricezione");
                 continue;
             }
+            total_bytes+=cur_bytes;
+            packets_recived++;
             if(option=='x'){//Richiesta della lista dei vicini
                 my_log_print(ds_log,"Ricevuta lista dei peer:\n %s",buffer);
                 update_neighbors(buffer);
@@ -3053,8 +3033,11 @@ void* ds_comunication_loop(void *arg){
         if(option == 'b'){//byebye
             break;
         }
-    }   
+    }
+    my_log_print(ds_log,"Chiusura in corso...\n");
+    my_log_print(ds_log,"Info traffico:\nBytes totali ricevuti %uB \nPacchetti ricevuti: %u\nMedia per pacchetto: %uB\n",total_bytes,packets_recived,(total_bytes/packets_recived));   
     close(socket);
+    my_log_print(ds_log,"FINE\n");;
     pthread_exit(NULL);
 }
 
@@ -3062,10 +3045,11 @@ void* ds_comunication_loop(void *arg){
  * @brief  Gestisce le richieste dei vicini
  * @note   vedi tcp_comunication _loop
  * @param  socket_served:int la socket che richiede un servizio al peer
- * @retval None
+ * @retval int: il numero dei bytes letti , -1 in caso di errore
  */
-void serve_peer(int socket_served){
+int serve_peer(int socket_served){
     char *buffer;
+    int bytes=0;
     uint64_t first_packet=0; // contiene la lunghezza del prossimo messaggio e del codice
     uint32_t len; // lunghezza messaggio
     uint32_t options;// 4 byte contenente una opzione per byte
@@ -3079,7 +3063,7 @@ void serve_peer(int socket_served){
 
         remove_neighbour(get_neighbour_by_socket(socket_served)->id);
         ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo amichetto
-        return;
+        return -1;
     }
     buffer = NULL;
     //4 byte di opzioni e 4byte che indica la lunghezza del pacchetto
@@ -3090,6 +3074,7 @@ void serve_peer(int socket_served){
     //printf("L'operazione è %d e la lunghezza è %d\n",options,len);
     operation =(char) options; // ci serve il primo byte
     //printf("operation %c\n",operation);
+    bytes = len+sizeof(uint64_t);
     my_log_print(peer_log,"Giunta operazione %c con lungezza %d\n",operation,len);
     if(len>0){
         my_log_print(peer_log,"Allocazione del buffer di lunghezza %d\n",len);
@@ -3098,7 +3083,7 @@ void serve_peer(int socket_served){
         if(recv(socket_served,(void*)buffer,len,0)<0){
             my_log_print(peer_log,"Errore nella ricezione, gestisco...\n",len);
             //perror("Errore in fase di ricezione\n");
-            return;
+            return -1;
         }
         my_log_print(peer_log,"Messaggio letto correttamente\n");
     }
@@ -3156,16 +3141,10 @@ void serve_peer(int socket_served){
             break;
         default:
             //Il messaggio non rispetta i protocolli di comunicazione, rimuovo il peer
-            my_log_print(peer_log,"Il peer non rispetta i protocolli di comunicazione, lo elimino dalla lista dei peer\n");
+            my_log_print(peer_log,"Il peer non rispetta i protocolli di comunicazione ( chiusura irregolare? ), lo elimino dalla lista dei peer\n");
             remove_neighbour(get_neighbour_by_socket(socket_served)->id);
             my_log_print(peer_log,"Richiedo al DS_thread la lista dei peer\n");
             ds_option_set('x');//Richiedo di nuovo la neighbour list al DS, magari ho un nuovo vicino
-            printf("Un vicino ha inviato un messaggio anomalo,\nlo rimuovo dalla lista dei vicini\n");
-            sleep(1);
-            printf("Richiedo nuovamente la lista dei vicini al DS, attendere\n");
-            sleep(2);
-            printf("Risolto.\n");
-            neighbors_list_print();
             //neighbors_list_print();
             break;
     }
@@ -3175,8 +3154,7 @@ void serve_peer(int socket_served){
             buffer =NULL;
         }
     }
-    
-    
+    return bytes; 
 }
 /**
  * @brief  Loop con il quale i peer comunicano fra loro
@@ -3186,6 +3164,9 @@ void serve_peer(int socket_served){
  */
 void * tcp_comunication_loop(void *arg){
     int peer_socket;
+    int cur_bytes;
+    unsigned int total_bytes =0;
+    unsigned int packets_recived = 0;
     struct sockaddr_in s_addr;
     struct sockaddr_in peer_addr;
     int s_port = *((int*)arg);
@@ -3204,7 +3185,6 @@ void * tcp_comunication_loop(void *arg){
     my_log_print(peer_log,"Socket aperta con successo\n",s_port);
     
     FD_SET(s_socket,&master);
-    //printf("Server socket = %d\n",s_socket);
     pthread_mutex_lock(&fd_mutex);
     max_socket = s_socket;
     pthread_mutex_unlock(&fd_mutex);
@@ -3220,22 +3200,24 @@ void * tcp_comunication_loop(void *arg){
                 if(socket_i == s_socket){
                     len = sizeof(peer_addr);
                     peer_socket = accept(s_socket,(struct sockaddr*) &peer_addr,&len);
-                    //my_log_print(peer_log,"È arrivato un nuovo peer socket:%d\n",peer_socket);
-                    serve_peer(peer_socket);
+                    cur_bytes=serve_peer(peer_socket);
                 }else{//Serviamo un peer;
                     my_log_print(peer_log,"Servo il client : %d\n",socket_i);
-                    serve_peer(socket_i);
+                    cur_bytes=serve_peer(socket_i);
                     
-                    /*if(send(socket_i,(void*)buffer,len,0)<0){
-                        perror("Errore in fase di invio\n");
-                    }*/
                     
 
                 }
             }
         }
+        if(cur_bytes>0){
+            total_bytes+=cur_bytes;
+            packets_recived+=2;
+        }
     }
-    
+    my_log_print(peer_log,"Chiusura in corso...\n");
+    my_log_print(peer_log,"Info traffico:\nBytes totali ricevuti %uB \nPacchetti ricevuti: %u\nMedia per pacchetto: %uB\n",total_bytes,packets_recived,(total_bytes/packets_recived));
+    my_log_print(peer_log,"FINE\n");
     pthread_exit(NULL);
 }
 

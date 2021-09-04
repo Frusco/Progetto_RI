@@ -4,12 +4,12 @@
 #define DEFAULT_TABLE_SIZE 2
 //Dimensione di partenza del vettore dei vicini di un peer
 #define DEFAULT_NEIGHBOUR_VECTOR_SIZE 2
-//La dimensione in caratteri del comando più grande
+//La dimensione in caratteri del comando più lungo
 #define SERVER_MAX_COMMAND_SIZE 14
 //Il numero dei comandi presenti
 #define SERVER_COMMANDS_NUMBER 6
 //Per la comunicazione UDP
-#define DS_BUFFER 255
+#define DS_BUFFER 255 //Bytes
 #define SERVER_WELCOME_MSG "Discovery Server pronto, benvenuto!\nScrivi comando, ( help per mostrare lista comandi )\n"
 #define SERVER_COMMAND_LIST {"help","showpeers","showneighbor","esc","showpeersinfo","closeday"}
 #define SERVER_HELP_MSG "showpeers : mostra la lista dei peers ordinata per porta\nshowneighbor <ID> : mostra i vicini del peer richiesto\nshowpeersinfo : mostra nel dettaglio le informazioni di tutti i peers\ncloseday: segnala ai peer di chiudere il registro di oggi\nesc: chiudi il server\n"
@@ -18,8 +18,8 @@
 //Path che contiene la data del registro aperto
 #define SYNC_TIME_PATH "ds_sync_time.txt"
 //Ore e minuti dell'orario di chiusura del registro del giorno
-#define END_REG_HOUR 15
-#define END_REG_MINUTES 32
+#define END_REG_HOUR 18
+#define END_REG_MINUTES 00
 
 //Nomi e path dei file di log
 #define DEFAULT_TIMER_COMUNICATION_LOG_FILENAME "ds_timer.log"

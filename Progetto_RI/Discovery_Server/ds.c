@@ -105,7 +105,10 @@ struct timer_elem* timer_list_check_and_remove(int id){
 int timer_list_head_time_experide(){
     int ret;
     pthread_mutex_lock(&timer_mutex);
-    if(!timer_list) return 0;
+    if(!timer_list){ 
+        pthread_mutex_unlock(&timer_mutex);
+        return 0;
+    }
     ret = (timer_list->time_to_live==0);
     pthread_mutex_unlock(&timer_mutex);
     return ret;
@@ -1091,6 +1094,9 @@ void thread_test(){
  */
 void* thread_ds_loop(void* arg){
     //buffers
+    unsigned int packets_recived = 0;
+    unsigned int total_bytes = 0;
+    int cur_bytes = 0;
     char buffer[DS_BUFFER];
     char *msg=0;
     int msg_len;
@@ -1119,12 +1125,14 @@ void* thread_ds_loop(void* arg){
     peer_addrlen = sizeof(peer_addr);
     //thread_test();
     while(get_loop_flag()){
-        
-        if(recvfrom(ds_socket,buffer,DS_BUFFER,0,(struct sockaddr*)&peer_addr,&peer_addrlen)<0){
+        cur_bytes = recvfrom(ds_socket,buffer,DS_BUFFER,0,(struct sockaddr*)&peer_addr,&peer_addrlen);
+        if(cur_bytes<0){
             perror("[DS_Thread]: Errore nella ricezione");
             my_log_print(ds_log,"Errore nella ricezione del pacchetto\n");
             continue;
         }
+        packets_recived++;
+        total_bytes +=cur_bytes;
         if(strcmp(buffer,"exit")==0){ 
             printf("[DS_Thread]: Ricosciuto comando di uscita\n");
             my_log_print(ds_log,"Riconosciuto comando di uscita\n");
@@ -1170,6 +1178,7 @@ void* thread_ds_loop(void* arg){
     close(ds_socket);
     my_log_print(ds_log,"Salvo sync_time\n");
     sync_time_save(cur_sync_time);
+    my_log_print(ds_log,"Info traffico:\nBytes totali ricevuti %uB \nPacchetti ricevuti: %u\nMedia per pacchetto: %uB\n",total_bytes,packets_recived,(total_bytes/packets_recived));
     my_log_print(ds_log,"FINE\n");
     pthread_exit(NULL);
 }

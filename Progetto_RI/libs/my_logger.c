@@ -13,7 +13,6 @@ struct my_log{
  */
 struct my_log* my_log_init(char *fp,char *n){
     struct my_log* ml;
-    printf("Creazione di un nuovo file di log %s - %s\n",fp,n);
     if(fp==NULL){
         printf("fp NULL");
         return NULL;
@@ -23,10 +22,11 @@ struct my_log* my_log_init(char *fp,char *n){
         return NULL;
     }
     if(n==NULL){
-        printf("Nome NUllo\n");
+        printf("Nome Nullo\n");
         return NULL;
     }
     if(strlen(n)==0)return NULL;
+    printf("Creazione di un nuovo file di log %s - %s\n",fp,n);
     ml = malloc(sizeof(struct my_log));
     ml->file_path = malloc(strlen(fp)+1);
     strcpy(ml->file_path,fp);
@@ -61,13 +61,9 @@ void my_log_print(struct my_log *ml,const char *msg, ...){
             tt->tm_sec,
             ml->name
     );
-    //printf("Provo a stampare %s\n",msg);
     va_start (args, msg);
-    //printf("vfprint\n");
     vfprintf (f, msg, args);
-    //printf("va_end\n");
     va_end (args);
-    //printf("Stampato tutto ciao ciao\n");
     fclose(f);
 }
 
