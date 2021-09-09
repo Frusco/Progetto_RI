@@ -2284,17 +2284,20 @@ char* generate_backup_message(time_t *s,time_t *e){
         if(er->creation_date>end)break;//Abbiamo superato la data di fine
 
         sprintf(name,"%ld,%u\n",er->creation_date,er->count);
+        //my_log_print(peer_log,"Prima della fopen\n");
         er->f=fopen(er->path,"r");
         if(er->f==NULL){
             er = er->next;
             continue;
         }
         //Controllo la dimensione del file
+        //my_log_print(peer_log,"Prima dell fseek\n");
         fseek(er->f, 0L, SEEK_SET);
         fseek(er->f, 0L, SEEK_END);
         size = ftell(er->f);
         fseek(er->f, 0L, SEEK_SET);
         msg = malloc(size+strlen(name));
+        //my_log_print(peer_log,"Prima di strcpy\n");
         strcpy(msg,name);
         if(size == 0){//File vuoto
             free(msg);
@@ -2304,11 +2307,17 @@ char* generate_backup_message(time_t *s,time_t *e){
         }
         fread((void*)(msg+strlen(name)),sizeof(char),size,er->f);
         msg[size+strlen(name)]='\0';
+        //my_log_print(peer_log,"Parte del msg\n %s\n",msg);
         if(tot_msg == NULL){//Prima volta che alloco tot_msg
+        //my_log_print(peer_log,"Prima allocazione\n");
             tot_msg = malloc(strlen(msg)+1);
+            //my_log_print(peer_log,"Prima della cpy\n");
             strcpy(tot_msg,msg);      
         }else{//Realloco tot_msg aggiungendoci le nuove entry del registro letto
-            tot_msg = realloc(tot_msg,(strlen(tot_msg)+strlen(msg)+1));
+        //my_log_print(peer_log,"Prima di realloc\n");
+            tot_msg = realloc(tot_msg,(strlen(tot_msg)+strlen(msg))+1);
+            //tot_msg[strlen(tot_msg)+strlen(msg)] = '\0';
+        //my_log_print(peer_log,"Prima di strcat con tot_msg = %s\n",tot_msg);
             strncat(tot_msg,msg,strlen(msg));
         }
         fclose(er->f);
@@ -2345,7 +2354,7 @@ void send_backups_to_all(){
         goto end_send_to_all;
         return;
     }
-    len = strlen(msg)+1;
+    len = strlen(msg)+1;//Per il carattere terminatore
     len = htonl(len);
     operations = (unsigned int)operation;
     operations = htonl(operations);
@@ -2532,6 +2541,7 @@ void send_request_data(struct request *r){
     }
     strcpy(msg,req_header);
     strcat(msg,backup);
+    msg[strlen(backup)+strlen(req_header)]='\0';
     len = strlen(msg)+1;
     len = htonl(len);
     operations = (unsigned int)operation;
