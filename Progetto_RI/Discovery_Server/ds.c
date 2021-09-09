@@ -77,6 +77,10 @@ struct timer_elem* timer_list_check_and_remove(int id){
         cur= cur->next;
     }
     //Aggiorno puntatore next
+    if(cur==NULL) {
+        pthread_mutex_unlock(&timer_mutex);
+        return NULL;
+    }
     if(prev == NULL){
         timer_list = cur->next;
     }else{
@@ -104,12 +108,16 @@ struct timer_elem* timer_list_check_and_remove(int id){
  */
 int timer_list_head_time_experide(){
     int ret;
+    my_log_print(timer_log,"Entro in head expire\n");
     pthread_mutex_lock(&timer_mutex);
     if(!timer_list){ 
+        my_log_print(timer_log,"List vuota\n");
         pthread_mutex_unlock(&timer_mutex);
         return 0;
     }
+    my_log_print(timer_log,"Controllo se il TTL è zero\n");
     ret = (timer_list->time_to_live==0);
+    my_log_print(timer_log,"Restituisco %d ha TTL==0 ? %d\n",timer_list->id,ret);
     pthread_mutex_unlock(&timer_mutex);
     return ret;
 }
@@ -137,9 +145,8 @@ void timer_list_update(){
     */
     my_log_print(timer_log,"Controllo i TTL scaduti\n");
     while(timer_list_head_time_experide()){
-        //sleep(1);
         my_log_print(timer_log,"ID:%d ha TTL 0, rimuovo il peer\n",timer_list->id);
-        remove_peer(timer_list->id); 
+        remove_peer(timer_list->id);    
     }
 }
 
@@ -348,11 +355,11 @@ pthread_mutex_t table_mutex;
  * @param  id: identificativo del peer 
  * @retval peer_des* puntatore al descrittore di peer, NULL se non esiste l'elemento
  */
-struct peer_des* get_peer_des(int id){
-    if(id >= peers_table_size){
+struct peer_des* get_peer_des(int id){ 
+    if(id >= peers_table_size || id<0){    
         return NULL;
     }  // Indice troppo altro rispetto alla grandezza della tabella
-    if(peers_table[id].port == -1){
+    if(peers_table[id].port == -1){     
         return NULL;
     }  // elemento vuoto della peers_table
     return &peers_table[id];
@@ -409,9 +416,7 @@ void peers_table_print_all_peers(){
     pthread_mutex_unlock(&table_mutex);
 }
 
-/*
-### GLOBALS INIT E FREE ################################################
-*/
+
 void logs_init(){
     char* path;
     char* name;
@@ -548,18 +553,7 @@ void globals_free(){
     logs_free();
 }
 
-/*
-### GESTIONE PEERS_TABLE ##############################################
-*/
 
-/*  
-Elementi della struct peer_des
-    struct sockaddr_in addr;
-    int port;
-    int neighbors_number; //Numero dei vicini
-    int  neighbors_vector_size;
-    int* neighbors_vector; //Array dinamico degli id dei vicini
-*/
 /**
  * @brief  Aggiunge le info di un peer nella peers_table
  * @note   
@@ -637,7 +631,7 @@ void peers_table_remove_peer(int i){
     pthread_mutex_lock(&table_mutex);
     if(i>=peers_table_size){pthread_mutex_unlock(&table_mutex); return;}
     pd = &peers_table[i];
-    if(pd==NULL) return;
+    if(pd==NULL) {pthread_mutex_unlock(&table_mutex);return;}
     if(pd->port == -1){pthread_mutex_unlock(&table_mutex);return;}
     pd->port = -1;
     free(pd->neighbors_vector);
@@ -763,9 +757,7 @@ int get_id_by_ip_port(struct in_addr addr,int port){
     return ret;
 }
 
-/*
-### GESTIONE peers_list ##############################################
-*/
+
 
 /**
  * @brief  inizializza un peer_elem e lo restituisce
@@ -837,7 +829,7 @@ void peers_list_remove(int id){
         return;
     }else if(prev_peer==NULL){
         peers_list = peer->next;
-        if(peer->next !=NULL) peer->next->prev = NULL;
+        if(peers_list !=NULL) peers_list->prev = NULL;
     } else{
         prev_peer->next = peer->next;
         if(peer->next!=NULL){
@@ -898,11 +890,13 @@ void fix_head_isolation(){
  * @retval None
  */
 void fix_tail_isolation(){
+    pthread_mutex_lock(&list_mutex);
     if(peers_number<2) {pthread_mutex_unlock(&list_mutex);return;}
     if(peers_list_tail == NULL) {pthread_mutex_unlock(&list_mutex);return;}
     struct peer_elem *peer = peers_list_tail->prev;
     int id = peers_list_tail->id;
     struct peer_des *pd = get_peer_des(id);
+    if(pd==NULL) {pthread_mutex_unlock(&list_mutex);return;}
     //Se possiede la quantità minima di vicini salto il controllo
     if(pd->neighbors_number>=MIN_NEIGHBOUR_NUMBER){pthread_mutex_unlock(&list_mutex);return;}
     while(peer!=NULL){
@@ -947,15 +941,6 @@ void peers_list_print(){
 }
 
 
-
-
-/*
-### FUNZIONI THREAD ##############################################
-*/
-
-/*
-
-*/
 /**
  * @brief  Aggiunge un peer alla rete
  * @note    Aggiunge una nuova riga alla tabbela dei descrittori di peer (peers_table)
@@ -995,15 +980,22 @@ i           solamento dei peer in testa e coda della lista.
  * @retval None
  */
 void remove_peer(int id){
+    my_log_print(ds_log,"Rimozione del peer %d...\n",id);
+    my_log_print(ds_log,"Rimozione dalla timer_list\n");
+    timer_list_delete(id);
+    my_log_print(ds_log,"Rimozione dalla peers_table\n");
     peers_table_remove_peer(id);
     for(int i = 0 ; i<peers_table_size;i++){
         if(id == i)continue;
         peers_table_remove_neighbour(i,id);
     }
+    my_log_print(ds_log,"Rimozione della peers_list\n");
     peers_list_remove(id);
+    my_log_print(ds_log,"Sistemo l'isolamento in testa\n");
     fix_head_isolation();
+    my_log_print(ds_log,"Sistemo la rimozione in cosa\n");
     fix_tail_isolation();
-    timer_list_delete(id);
+    my_log_print(ds_log,"FINITO!\n");
 }
 
 /*
@@ -1123,7 +1115,6 @@ void* thread_ds_loop(void* arg){
     my_log_print(ds_log,"Socket aperta!\n");
     printf("[DS_Thread]: Socket UDP aperta alla porta: %d\n",port);
     peer_addrlen = sizeof(peer_addr);
-    //thread_test();
     while(get_loop_flag()){
         cur_bytes = recvfrom(ds_socket,buffer,DS_BUFFER,0,(struct sockaddr*)&peer_addr,&peer_addrlen);
         if(cur_bytes<0){
@@ -1158,10 +1149,6 @@ void* thread_ds_loop(void* arg){
             }else{
                 my_log_print(ds_log,"%d è già sincronizzato, non invio niente\n",id);
             }
-                /*else if(cur_sync_time<time_recived){
-                sync_time_set(time_recived);
-                printf("Aggiorno la data sync_time! %ld\n",sync_time);
-            }*/
         }else if(option == 'x'){// Se x richiede anche la lista dei vicini
             my_log_print(ds_log,"%d richiede la lista dei suoi vicini\n",id);
             msg_len = generate_neighbors_list_message(id,&msg);
@@ -1235,10 +1222,6 @@ void * thread_timer_loop(void* arg){
 }
 
 
-/*
-### USER LOOP  e MAIN ##############################################
-*/
-
 /**
  * @brief   Controlla se il comando passato dall'utente è effettivamente uno di quelli
             riconosiuti, restituendo l'indice del comando ( -1 se non riconosciuto ) 
@@ -1300,8 +1283,6 @@ void user_loop(int port){
         printf(">> ");
         fgets(msg, 40, stdin);
         args_number = sscanf(msg,"%s %s",args[0],args[1]);
-        //args_number = scanf("%s",args[0],args[1]);
-        // arg_len = my_parser(&args,msg);
         my_log_print(user_log,"Stringa utente: %s\n",msg);
         if(args_number>0){
             command_index = find_command(args[0]);
@@ -1345,8 +1326,8 @@ void user_loop(int port){
             //__showpeersinfo__
             case 4:
                 my_log_print(user_log,"Riconosciuto comando Showpeersinfo\n");
-                timer_list_print();
-                //peers_table_print_all_peers();
+                //timer_list_print();
+                peers_table_print_all_peers();
             break;
             //__add_day__
             case 5:

@@ -7,7 +7,7 @@
 //Buffer per la comunicazione con il DS tramite UDP
 #define DS_BUFFER 255
 #define PEER_WELCOME_MSG "Peer pronto, benvenuto!\nScrivi comando, ( help per mostrare lista comandi )\n"
-#define PEER_HELP_MSG "start <porta> : Apre la comunicazione con il DS\nadd : \nget <request_type (t/v) > <entry_type (t/v) > <dd1:mm1,yyy1>,<dd2,mm2,yyyy2>: Genera ed elabora la richiesta\nshowpeers: mostra i vicini\nshowregs: mostra i registri salvati in locale\nesc: chiudi il peer\n"
+#define PEER_HELP_MSG "start <porta> : Apre la comunicazione con il DS\nadd <t,n> <numero>: aggiunge <numero> tamponi(t) positivi(n) nel registro aperto\nget <request_type (t/v) > <entry_type (t/n) > <dd1:mm1,yyy1>,<dd2,mm2,yyyy2>: Genera ed elabora la richiesta\nshowpeers: mostra i vicini\nshowregs: mostra i registri salvati in locale\nesc: chiudi il peer\n"
 #define PEER_COMMAND_LIST {"help","start","add","get","esc","showpeers","showregs"}
 //Maschera del primo pacchetto da 8 byte fissi
 // < 3 byte liberi> < 1 byte tipo operazione > < 4 byte lunghezza prossimo pacchetto >

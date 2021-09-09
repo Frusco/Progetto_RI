@@ -15,9 +15,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 
-/*
-### Neighbors struct ############################
-*/
+
 //L'identificatore fornito dal DS
 int my_id;
 //La porta di ascolto del servizio TCP
@@ -336,6 +334,7 @@ int flooding_list_all_checked(struct flooding_mate *fm);
 int flooding_list_check_flooding_mate(struct flooding_mate *fm,int id,int socket);
 struct neighbour* get_neighbour_by_socket(int socket);
 void send_request_to_all(struct request *r,int *avoid_socket);
+
 /**
  * @brief  Gestisce la risposta del peer per FILE not found, se tutti i vicini hanno risposto in modo negativo, effettuo il flooding per ottenere i dati
  * @note   Abbiamo inviato la richiesta di un file, ma ci è giunta una risposta negativa
@@ -387,7 +386,6 @@ void manage_FILE_found(char* buffer,int socket_served){
     }
     
     fwrite((void*)buffer,strlen(buffer),1,f);
-    //fwrite((void*)buffer,strlen(buffer)-1,1,f);
     
     for(int i = 0;i<strlen(path)+1;i++)printf("%c",path[i]);
     printf("\nRisultato:\n%s\n",buffer);
@@ -436,7 +434,6 @@ struct flooding_mate* init_flooding_list(int avoid_socket){
         n = n->next;
     }
     pthread_mutex_unlock(&neighbors_list_mutex);
-    //flooding_list_print(head);
     return head;
 }
 
@@ -479,15 +476,13 @@ int flooding_list_all_checked(struct flooding_mate *fm){
  */
 int flooding_list_check_flooding_mate(struct flooding_mate *fm,int id,int socket){
     while(fm){
-        //printf("Provo con  fmid=%d, fmso=%d\nConfronto con id:%d socket:%d\n%d&&%d = %d\n",fm->id,fm->socket,id,socket,fm->socket==socket,fm->id==id,fm->socket==socket && fm->id==id);
         if(fm->socket==socket && fm->id==id){
-            //printf("Beccato il vicino id=%d, so=%d\n",fm->id,fm->socket);
+            
             fm->recieved_flag = 1;
             return 1;
         }
         fm = fm->next;
     }
-    //printf("check flooding mate: Trovato niente\n");
     return 0;
 }
 
@@ -647,8 +642,6 @@ char* elab_variazione(struct entry *e){
     long index = 0;
     prev = e;
     i = 1;
-    //registers_list_print();
-    //printf("Dentro elab V!\n");
     start = malloc(sizeof(struct tm));
     end = malloc(sizeof(struct tm));
     while(prev){
@@ -660,19 +653,12 @@ char* elab_variazione(struct entry *e){
     sprintf(aux,"Variazione (%c):\n",e->type);
     
     while(e){
-        //printf("%dth cycle\n",i);
         i++;
-        //printf("Lavoro con %ld prev è %ld\n",e->timestamp.tv_sec,prev->timestamp.tv_sec);
         index = strlen(aux);
-        //printf("\tindex è %ld\n",index);
         //Utilizzo memcpy perché localtime restituisce sempre il puntatore al suo buffer interno
         //che sovrascrive di volta in volta
         memcpy(end,localtime(&e->timestamp.tv_sec),sizeof(struct tm));
         memcpy(start,localtime(&prev->timestamp.tv_sec),sizeof(struct tm));
-        /*printf("\ndal %d:%d:%d al %d:%d:%d è %ld",
-        start->tm_year+1900,start->tm_mon+1,start->tm_mday,
-        end->tm_year+1900,end->tm_mon+1,end->tm_mday,
-        (e->quantity-prev->quantity));*/
         sprintf(aux+index,"dal %d:%d:%d al %d:%d:%d è %ld\n",
         start->tm_year+1900,start->tm_mon+1,start->tm_mday,
         end->tm_year+1900,end->tm_mon+1,end->tm_mday,
@@ -680,8 +666,6 @@ char* elab_variazione(struct entry *e){
         prev = e;
         e = e->next;
     }
-    //printf("aux char by char\n");
-    //for(int i = 0;i<2014;i++)printf("%c",aux[i]);
     msg = malloc(strlen(aux)+1);
     strcpy(msg,aux);
     return msg;
@@ -710,14 +694,11 @@ char* get_elab_result_as_string(struct request *r){
         list->quantity = 0;
         list->timestamp.tv_sec = er->creation_date;
         list->next = NULL;
-        //registers_list_print();
         if(list_prev!=NULL){
-            //printf("list_prev->next prende list\n prev = %ld, list=%ld",list_prev->timestamp.tv_sec,list->timestamp.tv_sec);
             list_prev->next = list;
             list_prev = list;
         }
         if(head == NULL){ 
-            //printf("Head prende list\n");
             head = list;
             list_prev = list;
         }
@@ -735,12 +716,7 @@ char* get_elab_result_as_string(struct request *r){
         }
         er = er->next;
     }while(er->creation_date<=r->date_end);
-    /*e = head;
-    printf("Lista:\n");
-    while(e){
-        printf("%ld, quantity%ld\n",e->timestamp.tv_sec,e->quantity);
-        e=e->next;
-    }*/
+    
     switch(r->req_type){
         case 'v':
             my_log_print(peer_log,"Elaboro variazione richiesta\n");
@@ -867,8 +843,6 @@ fill_request_variables:
     req->entry_type = type;
     req->req_type = req_type;
     req->id = (id==NULL)?my_id:*id;
-    //printf("Date start = %ld",req->date_start);
-    //printf("Date end = %ld",req->date_end);
     return req;
 }
 
@@ -930,10 +904,8 @@ int add_entry_in_register(struct entries_register *er,struct entry *e){
         cur = cur->next;
     }
     if(prev==NULL){
-        //printf("Nessuno in lista lo aggiungo alla testa %s\n",ctime(&e->timestamp.tv_sec));
         er->entries = e;
     }else{
-        //printf("Lo aggiungo dopo a %s -> %s\n",ctime(&prev->timestamp.tv_sec),ctime(&e->timestamp.tv_sec));
         prev->next = e;
     }
     e->next = cur;
@@ -1095,17 +1067,12 @@ void registers_list_print(){
     while(cur){
         date = malloc(sizeof(struct tm));
         memcpy(date,localtime(&cur->creation_date),sizeof(struct tm));
-        //e_cur = cur->entries;
         if(!date)goto prosegui;
         printf("Registro : %d:%d:%d , ",date->tm_mday,date->tm_mon+1,date->tm_year+1900);
         printf(" %s, ",(cur->is_open)?"Aperto":"Chiuso");
         printf(" %s, ",(cur->is_completed)?"Completo":"Incompleto");
         printf(" Tot entries: %d",cur->count);
         printf(" Cod: %ld\n",cur->creation_date);
-        /*while(e_cur){
-            printf("\tentry: type:%c quantity: %ld date: %s",e_cur->type,e_cur->quantity,ctime(&e_cur->timestamp.tv_sec));  
-            e_cur = e_cur->next;
-        }*/
         
 prosegui:
         free(date);
@@ -1125,7 +1092,6 @@ char* register_as_string(struct entries_register *cur){
     s = malloc(255);
     date = malloc(sizeof(struct tm));
         memcpy(date,localtime(&cur->creation_date),sizeof(struct tm));
-        //e_cur = cur->entries;
         if(!date)return "";
         sprintf(s,"Registro : %d:%d:%d , ",date->tm_mday,date->tm_mon+1,date->tm_year+1900);
         sprintf(s," %s, ",(cur->is_open)?"Aperto":"Chiuso");
@@ -1289,10 +1255,8 @@ struct neighbour* add_neighbour(int id,int socket,struct in_addr addr,int port) 
         return n;//Già presente!
     } 
     if(socket==-1){//Ricevuto dal DS
-        //printf("socket -1 creo connessione\n");
         n = neighbour_init_and_connect(id,addr,port);
     }else{//Ricevuto dal socket listener
-        //printf("socket %d aggiungo vicino\n",socket);
         n = neighbour_init(id,socket,addr,port);
     }
     if(n==NULL){
@@ -1349,19 +1313,16 @@ struct entries_register* open_today_register(){
     time_t today;
     struct tm *timeinfo;
     time(&today);
-    //printf("%s",ctime(&today));
     timeinfo = localtime(&today);
     timeinfo->tm_sec = 0;
     timeinfo->tm_min = 0;
     timeinfo->tm_hour = 0;
     today = mktime(timeinfo);
-    //printf("%s",ctime(&today));
     er->count=0;
     er->is_completed=0;
     er->entries = NULL;
     er->is_open = 1;
     er->next = NULL;
-    //printf("%s",ctime(&today));
     do{
         er->creation_date = today;
         ret = registers_list_add(er);
@@ -1443,7 +1404,6 @@ close_loop://Recupero i giorni giorni persi aprendo e chiudendo i registri
     er = open_today_register();
     //Mi sincronizzo con gli altri peer
     if(current_open_date > er->creation_date) goto close_loop;
-    //registers_list_print();
     pthread_mutex_unlock(&register_mutex);
 }
 
@@ -1495,7 +1455,6 @@ struct entries_register* load_register(char* path){
     er->entries = NULL;
     er->next = NULL;
     er->count = 0;
-    //if(path==NULL) return;
     er->f = fopen(path,"r");
     while(fscanf(
         er->f,
@@ -1504,11 +1463,6 @@ struct entries_register* load_register(char* path){
         &aux.timestamp.tv_nsec,
         &aux.type,
         &aux.quantity)!=EOF){
-        /*printf("Dentro %ld.%ld:%c,%ld\n",
-        aux.timestamp.tv_sec,
-        aux.timestamp.tv_nsec,
-        aux.type,
-        aux.quantity);*/
         e = malloc(sizeof(struct entry));
         e->timestamp.tv_sec = aux.timestamp.tv_sec;
         e->timestamp.tv_nsec =aux.timestamp.tv_nsec;
@@ -1558,11 +1512,6 @@ int update_register_by_remote_string(char* buffer){
         &e->timestamp.tv_nsec,
         &e->type,
         &e->quantity);
-        /*printf("Dentro %ld.%ld:%c,%ld\n",
-        e->timestamp.tv_sec,
-        e->timestamp.tv_nsec,
-        e->type,
-        e->quantity);*/
         add_entry_in_register(er,e);
         index = size+1;
     }while(tot_size>index);
@@ -1579,16 +1528,12 @@ int update_register_by_remote_string(char* buffer){
 struct neighbour* get_neighbour_by_socket(int socket){
     struct neighbour*cur;
     cur = neighbors_list;
-    //printf("\tGET N by SOCKET = %d\n",socket);
     while(cur){
-        //printf("\tChecking id= %d socket = %d\n",cur->id,cur->socket);
         if(cur->socket == socket){
-            //printf("\t\tMATCH!\n");
             return cur;
         }
         cur = cur->next;
     }
-    //printf("No match :(\n");
     return NULL;
 }
 
@@ -1611,7 +1556,6 @@ int remove_neighbour(int id){
     pthread_mutex_unlock(&fd_mutex);
     free(n);
     pthread_mutex_unlock(&neighbors_list_mutex);
-    //neighbors_list_print();
     return 1;
 }
 
@@ -1631,9 +1575,7 @@ void neighbors_list_free(){
 }
 
 struct sockaddr ds_addr;
-/*
-### GLOBALS INIT E FREE #####################
-*/
+
 /**
  * @brief  Crea le cartelle del peer 
  * @note   
@@ -1643,7 +1585,6 @@ void generate_work_folders(){
     char path[50];
     int result;
     sprintf(path,"./__%d",my_port);
-    //printf("%s\n",path);
     result = mkdir(path, 0777);
     my_path = malloc(sizeof(char)*(strlen(path)+1));
     strcpy(my_path,path);
@@ -1676,7 +1617,6 @@ void registers_list_init(){
     if (d) {
         while ((dir = readdir(d)) != NULL) {//Leggo il nome del file
             if(strcmp((dir->d_name+strlen(dir->d_name)-3),"txt")==0){//Controllo che sia un txt
-                //printf("%s estensione %s\n", dir->d_name,(dir->d_name+strlen(dir->d_name)-3));
                 path_n_file_name = malloc(sizeof(char)*(strlen(my_path)+strlen(dir->d_name)+2));//+2 perché considero anche '/' e "\n"
                 strcpy(path_n_file_name,my_path);
                 strcat(path_n_file_name,"/");
@@ -1796,9 +1736,7 @@ void globals_free(){
     neighbors_list_free();
     logs_free();
 }
-/*
-### USER INTERFACE ############################
-*/
+
 /**
  * @brief  Controlla se il comando passato esiste
  * @note   
@@ -1956,11 +1894,8 @@ struct request* add_new_request(char rt, char t, char* dates){
         printf("Data fine troppo grande, aggiornata con l'ultimo registro aperto\n");
         *end = last_closed_reg->creation_date;
     }
-    //printf("start: %s, end:%s\n",ctime(start),ctime(end));
     my_log_print(user_log,"fcr: %s, lcr:%s\n",(start!=NULL)?ctime(&get_first_closed_register()->creation_date):"Nessuna",ctime(&last_closed_reg->creation_date));
-    //printf("start: %ld, end:%ld\n",*start,*end);
     my_log_print(user_log,"start: %s, end:%s\n",(start!=NULL)?ctime(start):"Nessuna",ctime(end));
-    //Alloco e inizializzo la request
     my_log_print(user_log,"Prima di init quest\n");
     r = init_request(t,rt,start,end,NULL,NULL);
     if(r)requestes_list_add(r);
@@ -2257,18 +2192,15 @@ int generate_entries_list_msg(struct entries_register *er,char **msg){
     fseek(er->f, 0L, SEEK_SET);
     *msg = malloc(sizeof(char)*(size+strlen(name)));
     
-    //memset(*msg,'\0',size+strlen(name));
     
     strcpy(*msg,name);
     if(size == 0){
-        //printf("Niente da copiare\n");
         free(*msg);
         msg = NULL;
         return size;
     }
     fread((void*)(*msg+strlen(name)),sizeof(char),size,er->f);
     (*msg)[size+strlen(name)]='\0';
-    //printf("\nStampo come stringa\n%s\n",*msg);
     fclose(er->f);
     return strlen(*msg);
 }
@@ -2337,8 +2269,6 @@ char* generate_backup_message(time_t *s,time_t *e){
     time_t start,end;
     er = registers_list;
     if(er == NULL) return NULL;
-//    end = (e==NULL)?0x7fffffffffffffff:*e;
-//    start = (s==NULL)?0:*s;
       //La data passata ( e ) altrimenti vogliamo spedire tutto e consideriamo anche il registro aperto ( caso esc )  
       end = (e==NULL)?get_open_register()->creation_date:*e;
       //La data passata ( s ) altrimenti il primo registro chiuso se esiste, altrimenti l'unico registro aperto.
@@ -2346,7 +2276,6 @@ char* generate_backup_message(time_t *s,time_t *e){
     //Per ogni registro nel range leggo le entry in un msg e via via concateno tutto in tot_msg
     //Generando un unico messaggio con i registri e le relative entry interessate
     while(er){
-        //printf("er = %ld\n",er->creation_date);
         if(er->creation_date<start){//Data non compresa
             my_log_print(peer_log,"creation_date: %ld <  start=%ld  ignoro per backup\n",er->creation_date,start);
             er = er->next;
@@ -2424,7 +2353,6 @@ void send_backups_to_all(){
     first_packet = first_packet<<32 | len;
     len = ntohl(len);
     while(n){
-        //printf("Generato il messaggio di lunghezza %dl\n messaggio:\n%s\n",len,msg);
     //Mando il primo pacchetto con l'operazione richiesta
     //e la lunghezza del secondo pacchetto  
         if(send(n->socket,(void*)&first_packet,sizeof(first_packet),0)<0){
@@ -2479,7 +2407,6 @@ char* generate_request_message(struct request *r){
  * @retval None
  */
 void send_request_to_all(struct request *r,int *avoid_socket){
-    //struct neighbour *n;
     uint64_t first_packet=0; // contiene la lunghezza del prossimo messaggio e del codice
     uint32_t len; // lunghezza messaggio
     uint32_t operations=0;
@@ -2603,20 +2530,15 @@ void send_request_data(struct request *r){
         my_log_print(peer_log,"Errore durante l'allocazione del messaggio\n");
         return;
     }
-    //printf("BACKUP:\n%s\nHEADER:%s\n",backup,req_header);
     strcpy(msg,req_header);
-    //printf("MSG_parziale:%s",msg);
     strcat(msg,backup);
-    //printf("MSG_completato:%s",msg);
     len = strlen(msg)+1;
-    //for(int i=0;i<len;i++)printf("%c",msg[i]);
     len = htonl(len);
     operations = (unsigned int)operation;
     operations = htonl(operations);
     first_packet = operations;
     first_packet = first_packet<<32 | len;
     len = ntohl(len);
-    //printf("Request DATA:\n -lunghezza %u\n -messaggio:\n%s\n",len,msg);
     //Mando il primo pacchetto con l'operazione richiesta
     //e la lunghezza del secondo pacchetto  
         if(send(r->ret_socket,(void*)&first_packet,sizeof(first_packet),0)<0){
@@ -2683,7 +2605,6 @@ int manage_request_answer(char *buffer,int socket){
     sscanf(buffer,"%s",aux);
     index+=strlen(aux)+1;
     sscanf(aux,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt);
-    //printf("Request\n%s\n",buffer);
     r = requestes_list_get(tp,id);
     if(r==NULL){//Non dovrebbe accadere, ma la gestiamo
         my_log_print(peer_log,"Risposta di una richiesta inesistente\n");
@@ -2694,8 +2615,6 @@ int manage_request_answer(char *buffer,int socket){
         my_log_print(peer_log,"Nessun vicino corrisponde alla socket passata!\n");
         return 0;
     }
-    //printf("Socket che sto servendo: %d, nid=%d ns=%d\n",socket,n->id,n->socket);
-    //flooding_list_print(r->flooding_list);
     if(!flooding_list_check_flooding_mate(r->flooding_list,n->id,socket)){
         my_log_print(peer_log,"Il vicino %d non è in lista!\n",n->id);
         /*Qualcosa è andato storto, abbiamo ricevuto un pacchetto
@@ -2703,7 +2622,6 @@ int manage_request_answer(char *buffer,int socket){
         */
         return 0;
     }
-    //printf("Passo a manage_register_backup con\n %s\n",buffer+index);
     manage_register_backup(buffer+index);
     if(flooding_list_all_checked(r->flooding_list)){
         if(r->ret_socket==-1){//Sono io che ho iniziato la richiesta
@@ -2767,7 +2685,6 @@ int manage_new_request(char *buffer,int socket){
         my_log_print(peer_log,"Errore nella lettura dei dati della request, richiesta scartata");
         return -1;
     }
-    //printf("Request\n%s\n",buffer);
     r = requestes_list_get(tp,id);
     if(r){
         my_log_print(peer_log,"Richiesta già presente, gestisco il loop\n");
@@ -2940,9 +2857,7 @@ void update_neighbors(char* msg){
     //printf("Il mio id = %d\n",my_id);
     index = strlen(aux)+1;
     for(int i = 0; i<entries_number;i++){
-        //printf("msg:\n%s",msg+index);
         sscanf(msg+index,"%s\n",aux);
-        //printf("Leggo riga %s\n",aux);
         sscanf(aux,"%d,%u,%d",&id,&neig_addr.s_addr,&s_port);
         //-1 perché non conosciamo la socket
         add_neighbour(id,-1,neig_addr,s_port);
@@ -3047,7 +2962,6 @@ void* ds_comunication_loop(void *arg){
         ds_to_read = ds_master;
         timeout.tv_sec = DS_COMUNICATION_LOOP_SLEEP_TIME;
         ret = select(socket+1,&ds_to_read,NULL,NULL,&timeout); //Abbiamo solo una socket nella lista
-        //perror("Select:");
         if(ret==1){
             cur_bytes = recvfrom(socket,buffer,DS_BUFFER,0,(struct sockaddr*)&ds_addr,&ds_addrlen);
             if(cur_bytes<0){
@@ -3062,11 +2976,8 @@ void* ds_comunication_loop(void *arg){
                 my_log_print(ds_log,"Imposto il messaggio da inviare al DS: 'Refresh'-> 'r'\n");
                 ds_option_set('r');//Il loop passa in modalità sincronizzazione ( refresh )
             }else if(option == 'r'){
-                //printf("Ricevuto \n%s\n",buffer);
-                //printf("Subito dopo ricevuto\n%ld",time_recived);
                 my_log_print(ds_log,"Ho ricevuto il comando di chiudere il registro, apro il successivo\n");
                 sscanf(buffer,"%ld\n",&time_recived);
-                //printf("Il mio tempo:%ld , ricevuto:%ld ",get_current_open_date(),time_recived);
                 if(time_recived > get_current_open_date()){//dobbiamo sincronizzarci
                     set_current_open_date(time_recived);
                     close_today_register();
@@ -3105,7 +3016,6 @@ int serve_peer(int socket_served){
                     // il prossimo pacchetto
     int peer_id,peer_port;
     struct in_addr peer_addr;
-    //printf("Servo %d",socket_served);
     if(recv(socket_served,(void*)&first_packet,sizeof(first_packet),0)<0){
 
         remove_neighbour(get_neighbour_by_socket(socket_served)->id);
@@ -3118,9 +3028,7 @@ int serve_peer(int socket_served){
     len = first_packet & PACKET_MASK;
     options = ntohl(options);
     len = ntohl(len);
-    //printf("L'operazione è %d e la lunghezza è %d\n",options,len);
     operation =(char) options; // ci serve il primo byte
-    //printf("operation %c\n",operation);
     bytes = len+sizeof(uint64_t);
     my_log_print(peer_log,"Giunta operazione %c con lungezza %d\n",operation,len);
     if(len>0){
@@ -3129,7 +3037,6 @@ int serve_peer(int socket_served){
         my_log_print(peer_log,"In attesa del messaggio...\n",len);
         if(recv(socket_served,(void*)buffer,len,0)<0){
             my_log_print(peer_log,"Errore nella ricezione, gestisco...\n",len);
-            //perror("Errore in fase di ricezione\n");
             return -1;
         }
         my_log_print(peer_log,"Messaggio letto correttamente\n");
@@ -3140,8 +3047,6 @@ int serve_peer(int socket_served){
             sscanf(buffer,"%d,%u,%d",&peer_id,&peer_addr.s_addr,&peer_port);
             my_log_print(peer_log,"Un nuovo peer si è unito al vicinato! id: %d addr: %u, porta: %d\n",peer_id,peer_addr.s_addr,peer_port);
             add_neighbour(peer_id,socket_served,peer_addr,peer_port);
-            //my_log_print(peer_log,"È arrivato un nuovo peer!:\n");
-            //neighbors_list_print();
             break;
         case 'U'://Update
             my_log_print(peer_log,"Gestione di un messaggio di backup da %d\n",socket_served);
@@ -3267,42 +3172,6 @@ void * tcp_comunication_loop(void *arg){
     pthread_exit(NULL);
 }
 
-/*
-uint64_t prova=0;
-uint64_t mask = 0x00000000FFFFFFFF;
-char ugo = 'n';
-prova = ugo;
-prova = prova<<32 | (unsigned int)2560 ;
-printf("%c,%u",prova>>32,prova & mask);
-
-*/
-
-/*
-    uint64_t prova=0;
-    uint64_t mask = 0x00000000FFFFFFFF;
-    uint32_t len = 598764;
-    uint32_t option = 'n'; //4 byte option;
-    option = htonl(option);
-    len = htonl(len);
-    prova = option;
-    prova = prova<<32 | len;
-    printf("%u,%u\n",prova>>32,prova & mask);
-    option = prova>>32;
-    len = prova & mask;
-    option = htonl(option);
-    len = htonl(len);
-    printf("%u,%u\n",option,len);
-    return 1;
-*/
-
-    /*struct tm t;
-    time_t tt;
-    memset(&t,0,sizeof(struct tm));
-    t.tm_mday= 22;
-    t.tm_mon = 1-1;
-    t.tm_year = 2021-1900;
-    tt = mktime(&t);
-    printf("Mio compleannop %s",ctime(&tt));*/
 
 int main(int argc, char* argv[]){
     if(argc>1){
@@ -3320,4 +3189,3 @@ int main(int argc, char* argv[]){
     globals_free();
     printf("Ciao, ciao!\n");
 }
-    //strcpy(path,my_path);
