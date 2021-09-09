@@ -811,7 +811,6 @@ char* elab_request(struct request *r){
     fprintf(f,"%s",result);
     fclose(f);
     free(result);
-    unlock_user_input();
     return path;
 }
 
@@ -1114,6 +1113,27 @@ prosegui:
         
     }
 }
+/**
+ * @brief  Restituisce le info di un registro come stringa
+ * @note   
+ * @param  *cur:entries_register puntatore al registro 
+ * @retval char* stringa
+ */
+char* register_as_string(struct entries_register *cur){
+    char *s;
+    struct tm *date;
+    s = malloc(255);
+    date = malloc(sizeof(struct tm));
+        memcpy(date,localtime(&cur->creation_date),sizeof(struct tm));
+        //e_cur = cur->entries;
+        if(!date)return "";
+        sprintf(s,"Registro : %d:%d:%d , ",date->tm_mday,date->tm_mon+1,date->tm_year+1900);
+        sprintf(s," %s, ",(cur->is_open)?"Aperto":"Chiuso");
+        sprintf(s," %s, ",(cur->is_completed)?"Completo":"Incompleto");
+        sprintf(s," Tot entries: %d",cur->count);
+        sprintf(s," Cod: %ld\n",cur->creation_date);
+        return s;
+}
 
 /**
  * @brief  Stampa la lista dei vicini
@@ -1349,7 +1369,7 @@ struct entries_register* open_today_register(){
     //La data di oggi potrebbe essere già stata chiusa
     }while(!ret);
     //Completiamo l'inizializzazione
-    sprintf(filename,"%d%d-%ld",er->is_completed,er->is_open,er->creation_date);
+    sprintf(filename,"%d_%d-%ld",er->is_completed,er->is_open,er->creation_date);
     er->path = malloc(sizeof(char)*(strlen(my_path)+strlen(filename)+7));//+7 perché considero anche '/' e "\0" e .txt
     strcpy(er->path,my_path);
     strcat(er->path,"/");
@@ -1374,7 +1394,7 @@ struct entries_register* init_closed_register(time_t cd){
     er->is_open = 0;
     er->is_completed=0;
     er->next = NULL;
-    sprintf(filename,"%d%d-%ld",er->is_completed,er->is_open,er->creation_date);
+    sprintf(filename,"%d_%d-%ld",er->is_completed,er->is_open,er->creation_date);
     er->path = malloc(sizeof(char)*(strlen(my_path)+strlen(filename)+7));
     strcpy(er->path,my_path);
     strcat(er->path,"/");
@@ -1461,11 +1481,15 @@ struct entries_register* load_register(char* path){
     struct entries_register *er;
     struct entry *e;
     struct entry aux;
+    char* s;
     memset(&aux,0,sizeof(struct entry));
     er = malloc(sizeof(struct entries_register));
     char* file_name = get_file_name(path);
-    //printf("il path è %s\n il nome del file è %s\n",path,file_name);
-    sscanf(file_name,"%d%d-%ld",&er->is_completed,&er->is_open,&er->creation_date);
+    my_log_print(user_log,"Carico il registro con path %s\n ( il nome del file è %s )\n",path,file_name);
+    if(sscanf(file_name,"%d_%d-%ld",&er->is_completed,&er->is_open,&er->creation_date)< 3){
+        my_log_print(user_log,"Il File non ha il nome corretto, annullo il caricamento...\n");
+        return NULL;
+    }
     er->path = malloc(sizeof(char)*(strlen(path)+1));
     strcpy(er->path,path);
     er->entries = NULL;
@@ -1493,9 +1517,12 @@ struct entries_register* load_register(char* path){
         e->next = NULL;
         add_entry_in_register(er,e);
     }
+    s = register_as_string(er);
+    my_log_print(user_log,"Inserisco il registro nella lista:\n%s\n",s);
+    free(s);
     registers_list_add(er);
     fclose(er->f);
-    //printf("fine load\n");
+    my_log_print(user_log,"Registri caricati\n");
     return er;
 }
 
@@ -1654,6 +1681,7 @@ void registers_list_init(){
                 strcpy(path_n_file_name,my_path);
                 strcat(path_n_file_name,"/");
                 strcat(path_n_file_name,dir->d_name);
+                my_log_print(user_log,"Caricamento del register: %s",path_n_file_name);
                 load_register(path_n_file_name);
                 free(path_n_file_name);
             }
@@ -1746,8 +1774,8 @@ void globals_init(){
     FD_ZERO(&to_read);
     neighbors_list = NULL;
     generate_work_folders();
-    registers_list_init();
     logs_init();
+    registers_list_init();
     pthread_cond_init(&request_busy,NULL);
     pthread_mutex_init(&request_mutex,NULL);
     pthread_mutex_init(&neighbors_list_mutex,NULL);
@@ -2010,6 +2038,7 @@ void user_loop(){
                     break;
                 }
                 port = atoi(args[1]);
+                lock_user_input();
                 if(pthread_create(&ds_comunication_thread,NULL,ds_comunication_loop,(void*)&port)){
                     perror("Errore nella creazione del thread\n");
                     my_log_print(user_log,"Errore fatale, impossibile creare il thread per comunicare con il DS\n");
@@ -2097,6 +2126,7 @@ void user_loop(){
                     printf("Calcolo effettuato localmente.\nRisultato salvato in:\n%s\n",result);
                     my_log_print(user_log,"Elaborato salvato in: %s\n",result);
                     free(result);
+                    unlock_user_input();
                     break;
                 }
                 printf("Non abbiamo tutti i dati, chiedo ai vicini il FILE\n");
@@ -2323,6 +2353,7 @@ char* generate_backup_message(time_t *s,time_t *e){
             continue;
         }
         if(er->creation_date>end)break;//Abbiamo superato la data di fine
+
         sprintf(name,"%ld,%u\n",er->creation_date,er->count);
         er->f=fopen(er->path,"r");
         if(er->f==NULL){
@@ -2379,7 +2410,7 @@ void send_backups_to_all(){
     char operation = 'U';//Update!
     my_log_print(user_log,"Genero il messaggio di backup\n");
     char *msg = generate_backup_message(NULL,NULL);
-    my_log_print(peer_log,"Il messaggio: %s\n",msg);
+    my_log_print(peer_log,"Il messaggio generato da inviare: %s\n",msg);
     if(msg==NULL){
         my_log_print(user_log,"Niente da inviare\n");
         goto end_send_to_all;
@@ -2423,10 +2454,13 @@ end_send_to_all:
  */
 char* generate_request_message(struct request *r){
     char* msg;
-    char aux[128];
+    char aux[256];
     long len;
     if(r==NULL)return NULL;
-    sprintf(aux,"%d,%ld,%ld,%ld,%c,%c\n",r->id,r->timestamp,r->date_start,r->date_end,r->entry_type,r->req_type);
+    if(sprintf(aux,"%d,%ld,%ld,%ld,%c,%c\n",r->id,r->timestamp,r->date_start,r->date_end,r->entry_type,r->req_type)<6){
+        my_log_print(peer_log,"Generate_Header_Rrquest: Errore nella lettura dei parametri della request\n");
+        return NULL;
+    }
     len = strlen(aux);
     if(len==0)return NULL;
     msg = malloc(len);
@@ -2493,7 +2527,7 @@ void send_request_to_all(struct request *r,int *avoid_socket){
             n=n->next;
             continue;
         }
-        my_log_print(peer_log,"Request inviata a %d porta=%u\n",n->id,n->addr.sin_port);
+        my_log_print(peer_log,"Request inviata a %d socket=%d porta=%u\n",n->id,n->socket,n->addr.sin_port);
         n=n->next;
     }
     
@@ -2551,18 +2585,19 @@ void send_request_data(struct request *r){
     uint64_t first_packet=0; // contiene la lunghezza del prossimo messaggio e del codice
     uint32_t len; // lunghezza messaggio
     uint32_t operations=0;    char operation = 'A';//Answer!
-    my_log_print(peer_log,"Invio i dati richiesti...\n");
     if(r==NULL){
-        my_log_print(peer_log,"La request è NULL!\n");
+        my_log_print(peer_log,"Non posso inviare i dati alla request: La request è NULL!\n");
         return;
     }
+    my_log_print(peer_log,"Invio i dati richiesti per la request:\n");
     backup = generate_backup_message(&r->date_start,&r->date_end);
+    my_log_print(peer_log,"Il backup generato da inviare: %s\n",backup);
     req_header = generate_request_message(r);
     if(!backup || !req_header){
         my_log_print(peer_log,"Niente da inviare\n");
         return;
     }
-    my_log_print(peer_log,"La dimensione da alloracare è %dB",strlen(backup)+strlen(req_header)+1);
+    my_log_print(peer_log,"La dimensione da allocare è %dB",strlen(backup)+strlen(req_header)+1);
     msg =malloc(strlen(backup)+strlen(req_header)+1);
     if(!msg){
         my_log_print(peer_log,"Errore durante l'allocazione del messaggio\n");
@@ -2672,9 +2707,12 @@ int manage_request_answer(char *buffer,int socket){
     manage_register_backup(buffer+index);
     if(flooding_list_all_checked(r->flooding_list)){
         if(r->ret_socket==-1){//Sono io che ho iniziato la richiesta
+            my_log_print(peer_log,"Sono io che ho fatto la richiesta, procedo ad elaborarla\n");
             check_all_registers_as_completed(r);
             printf("Risultato salvato in : %s\n",elab_request(r));
+            unlock_user_input();
         }else{//Invio il risultato alla ret_socket di r
+            my_log_print(peer_log,"Inoltro i dati\n");
             send_request_data(r);
         }
     }
@@ -2718,14 +2756,17 @@ int send_ignore_my_answer(char *msg,int socket){
  * @note   
  * @param  *buffer:char i dati della richiesta 
  * @param  socket:int la socket dalla quale abbiamo ricevuto la richiesta 
- * @retval int 0 già presente, 1 nuova richiesta inserita con successo
+ * @retval int 0 già presente, 1 nuova richiesta inserita con successo, -1 in caso di errore
  */
 int manage_new_request(char *buffer,int socket){
     struct request *r;
     int id;
     char t,rt;//type,req_type
     time_t s,e,tp;//start,end,timestamp  
-    sscanf(buffer,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt);
+    if(sscanf(buffer,"%d,%ld,%ld,%ld,%c,%c",&id,&tp,&s,&e,&t,&rt)<6){
+        my_log_print(peer_log,"Errore nella lettura dei dati della request, richiesta scartata");
+        return -1;
+    }
     //printf("Request\n%s\n",buffer);
     r = requestes_list_get(tp,id);
     if(r){
@@ -2773,17 +2814,22 @@ int manage_ignore_answer(char* buffer, int socket){
     }
     n = get_neighbour_by_socket(socket);
     if(n==NULL){
-        printf("Nessun vicino corrisponde alla socket passata!\n");
+        my_log_print(peer_log,"Nessun vicino corrisponde alla socket passata!\n");
         return 0;
     }
     //Lo flaggo e ignoro
+    my_log_print(peer_log,"Spunto %d dai flooding mate\n",socket);
     flooding_list_check_flooding_mate(r->flooding_list,n->id,socket);
+    my_log_print(peer_log,"Controllo se tutti i flooding mate hanno risposto\n");
     if(flooding_list_all_checked(r->flooding_list)){
+        my_log_print(peer_log,"Tutto pronto! Procedo ad elaborare oppure inoltrare i dati\n");
         if(r->ret_socket==-1){//Sono io che ho iniziato la richiesta
-            //TO DO
+            my_log_print(peer_log,"Sono io che ho fatto la richiesta, procedo ad elaborarla\n");
             check_all_registers_as_completed(r);
             printf("Risultato salvato in : %s\n",elab_request(r));
+            unlock_user_input();
         }else{//Invio il risultato alla ret_socket di r
+            my_log_print(peer_log,"Inoltro i dati\n");
             send_request_data(r);
         }
     }
@@ -3115,7 +3161,7 @@ int serve_peer(int socket_served){
             break;
         case 'I'://Ignore
             my_log_print(peer_log,"Ricevuto 'Ignora' da %d\n",socket_served);
-            //my_log_print(peer_log,"Messaggio ricevuto\n%s\n",buffer);
+            my_log_print(peer_log,"Messaggio ricevuto\n%s\n",buffer);
             manage_ignore_answer(buffer,socket_served);
             break;
         case 'N'://Not found
@@ -3183,7 +3229,7 @@ void * tcp_comunication_loop(void *arg){
     ret = listen(s_socket,DEFAULT_SOCKET_SLOTS);
     printf("Socket tcp aperta alla porta: %d\n",s_port);
     my_log_print(peer_log,"Socket aperta con successo\n",s_port);
-    
+    unlock_user_input();
     FD_SET(s_socket,&master);
     pthread_mutex_lock(&fd_mutex);
     max_socket = s_socket;
@@ -3202,7 +3248,7 @@ void * tcp_comunication_loop(void *arg){
                     peer_socket = accept(s_socket,(struct sockaddr*) &peer_addr,&len);
                     cur_bytes=serve_peer(peer_socket);
                 }else{//Serviamo un peer;
-                    my_log_print(peer_log,"Servo il client : %d\n",socket_i);
+                    my_log_print(peer_log,"Servo il client %d con Socket: %d\n",get_neighbour_by_socket(socket_i)->id,socket_i);
                     cur_bytes=serve_peer(socket_i);
                     
                     
