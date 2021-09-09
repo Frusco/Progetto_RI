@@ -3023,6 +3023,7 @@ void* ds_comunication_loop(void *arg){
             }
         }
         printf("Socket udp aperta alla porta %d\n",s_port);
+        unlock_user_input();
         break;
     }
     FD_ZERO(&ds_master);
@@ -3229,7 +3230,6 @@ void * tcp_comunication_loop(void *arg){
     ret = listen(s_socket,DEFAULT_SOCKET_SLOTS);
     printf("Socket tcp aperta alla porta: %d\n",s_port);
     my_log_print(peer_log,"Socket aperta con successo\n",s_port);
-    unlock_user_input();
     FD_SET(s_socket,&master);
     pthread_mutex_lock(&fd_mutex);
     max_socket = s_socket;
