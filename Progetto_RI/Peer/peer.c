@@ -1152,10 +1152,10 @@ struct neighbour* neighbour_init_and_connect(int id,struct in_addr addr,int port
     n->addr.sin_addr = addr;
     if(connect(n->socket,(struct sockaddr*)&n->addr,sizeof(n->addr))==0){
         if(send_greeting_message(n)) return n;
-        my_log(peer_log,"Errore nell'invio del messaggio di saluto! Ignoro socket\n");
+        my_log_print(peer_log,"Errore nell'invio del messaggio di saluto! Ignoro socket\n");
         return NULL;
     }else{
-        my_log(peer_log,"Errore nell'apertura della neighbour socket, DS non ancora aggiornato? Ignoro socket\n");
+        my_log_print(peer_log,"Errore nell'apertura della neighbour socket, DS non ancora aggiornato? Ignoro socket\n");
         return NULL;
     }
 }
