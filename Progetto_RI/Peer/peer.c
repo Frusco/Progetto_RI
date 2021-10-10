@@ -1338,12 +1338,11 @@ struct entries_register* open_today_register(){
     strcat(er->path,"/");
     strcat(er->path,filename);
     strcat(er->path,".txt");
-    free(timeinfo);
     return er;
 }
 /**
  * @brief  Alloca e inizializza un registro chiuso in memoria e lo restituisce
- * @note   vedi manage_register_backup
+ * * @note   vedi manage_register_backup
  * @param  cd:time_t 
  * @retval entries_register* puntatore al registro inizializzato
  */
@@ -1777,7 +1776,8 @@ int check_date_format(char *dates){
     else {
         aux = strtok(NULL,",");
         if(strlen(aux)==1) ret=1;//Solo start ( dates+strlen(aux)+1 punto alla parte di stringa che mi interessa )
-    }  
+    }
+  
     free(cpy);
     return ret;
 }
