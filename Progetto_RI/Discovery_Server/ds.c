@@ -375,8 +375,10 @@ struct peer_des* get_peer_des(int id){
  */
 void peers_table_print_peer(int id){
     struct peer_des* p = get_peer_des(id);
+    char str[INET_ADDRSTRLEN];
     if(p){
-        printf("\nID: %d\naddr: %u\nport: %d\nneighbors_number: %d\nneighbors_list: ",id,p->addr.s_addr,p->port,p->neighbors_number);
+        inet_ntop(AF_INET, &(p->addr.s_addr), str, INET_ADDRSTRLEN);
+        printf("\nID: %d\naddr: %s\nport: %d\nneighbors_number: %d\nneighbors_list: ",id,str,p->port,p->neighbors_number);
         for(int i = 0 ; i<p->neighbors_vector_size;i++){
             if(p->neighbors_vector[i]==-1)continue;
             printf("%d ",p->neighbors_vector[i]);

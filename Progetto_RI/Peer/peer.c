@@ -1139,8 +1139,10 @@ struct neighbour* neighbour_init_and_connect(int id,struct in_addr addr,int port
     if(connect(n->socket,(struct sockaddr*)&n->addr,sizeof(n->addr))==0){
         if(send_greeting_message(n)) return n;
         my_log_print(peer_log,"Errore nell'invio del messaggio di saluto! Ignoro socket\n");
+        free(n);
         return NULL;
     }else{
+        free(n);
         my_log_print(peer_log,"Errore nell'apertura della neighbour socket, DS non ancora aggiornato? Ignoro socket\n");
         return NULL;
     }
@@ -1336,6 +1338,7 @@ struct entries_register* open_today_register(){
     strcat(er->path,"/");
     strcat(er->path,filename);
     strcat(er->path,".txt");
+    free(timeinfo);
     return er;
 }
 /**
@@ -1764,14 +1767,17 @@ int check_date_format(char *dates){
     if(dates==NULL)return -1;//nessuna data
     cpy = malloc(strlen(dates)+1);
     strcpy(cpy,dates);
-    if(strcmp(cpy,"")==0)return -1;
+    if(strcmp(cpy,"")==0){
+        free(cpy);
+        return -1;
+    }
     aux = strtok(cpy,",");
     //my_log_print(user_log,"Controllo prima data: %s\n",aux);
     if(strlen(aux)==1) ret=2;//Solo end
     else {
         aux = strtok(NULL,",");
         if(strlen(aux)==1) ret=1;//Solo start ( dates+strlen(aux)+1 punto alla parte di stringa che mi interessa )
-    }
+    }  
     free(cpy);
     return ret;
 }
@@ -2160,13 +2166,16 @@ int send_greeting_message(struct neighbour* n){
     //e la lunghezza del secondo pacchetto
     
     if(send(n->socket,(void*)&first_packet,sizeof(first_packet),0)<0){
+        free(buffer);
         perror("Errore in fase di invio\n");
         return 0;
     }
     if(send(n->socket,(void*)buffer,(size_t)len,0)<0){//size_t è un unsigned long
+        free(buffer);
         perror("Errore in fase di invio\n");
         return 0;
     }
+    free(buffer);
     my_log_print(ds_log,"Saluto inviato!\n");
     return 1;
 }
@@ -2296,7 +2305,8 @@ char* generate_backup_message(time_t *s,time_t *e){
         fseek(er->f, 0L, SEEK_END);
         size = ftell(er->f);
         fseek(er->f, 0L, SEEK_SET);
-        msg = malloc(size+strlen(name));
+        if(msg) free(msg);
+        msg = malloc(size+strlen(name)+1);
         //my_log_print(peer_log,"Prima di strcpy\n");
         strcpy(msg,name);
         if(size == 0){//File vuoto
@@ -2391,7 +2401,7 @@ end_send_to_all:
  */
 char* generate_request_message(struct request *r){
     char* msg;
-    char aux[256];
+    char aux[512];
     long len;
     if(r==NULL)return NULL;
     if(sprintf(aux,"%d,%ld,%ld,%ld,%c,%c\n",r->id,r->timestamp,r->date_start,r->date_end,r->entry_type,r->req_type)<6){
@@ -2400,7 +2410,7 @@ char* generate_request_message(struct request *r){
     }
     len = strlen(aux);
     if(len==0)return NULL;
-    msg = malloc(len);
+    msg = malloc(len+1);
     strcpy(msg,aux);
     return msg;
 }
