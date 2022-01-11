@@ -15,7 +15,7 @@ Se <opzione> è ```x```:
 Se <opzione> è ```r``` e la data non coincide:
 ```< data_registro_aperto >```
 
-###Legenda:
+### Legenda:
 - ```indirizzo```: indirizzo ip del peer.
 - ```ID / id_vicino```: identificativo numerico che il DS associa al peer, nonché indice nella Peers Table dell’elemento.
 - ```data_registro_aperto```: data trasmessa sia dai peer che dal DS per sincronizzare i registri aperti.
